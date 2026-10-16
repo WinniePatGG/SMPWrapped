@@ -18,6 +18,7 @@ import java.io.InputStream;
 import java.net.BindException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 
 public class WebServerManager {
@@ -28,6 +29,7 @@ public class WebServerManager {
     private Javalin app;
     private RateLimiter rateLimiter;
     private AdminAuth adminAuth;
+    private final Set<String> refreshingSnapshots = ConcurrentHashMap.newKeySet();
     private volatile String indexHtmlCache;
 
     public WebServerManager(SMPWrapped plugin) {
@@ -389,19 +391,96 @@ public class WebServerManager {
         }
 
         
-        Optional<WrappedSnapshot> snapshot = plugin.getDatabase().getWrappedSnapshot(playerId, seasonId);
-        if (snapshot.isEmpty()) {
-            Optional<TrackedPlayer> player = plugin.getDatabase().getPlayer(playerId);
-            if (player.isEmpty()) {
-                ctx.json(Map.of("error", "Player not found")).status(HttpStatus.NOT_FOUND);
-                return;
+        Optional<TrackedPlayer> player = plugin.getDatabase().getPlayer(playerId);
+        if (player.isEmpty()) {
+            ctx.json(Map.of("error", "Player not found")).status(HttpStatus.NOT_FOUND);
+            return;
+        }
+        String playerName = player.get().lastName();
+
+        
+        Optional<WrappedSnapshot> cached = plugin.getDatabase().getWrappedSnapshot(playerId, seasonId);
+        WrappedSnapshot snapshot;
+        boolean refreshed = false;
+        if (cached.isPresent()) {
+            snapshot = cached.get();
+            refreshed = refreshIfStale(playerId, seasonId, snapshot, playerName);
+            if (!refreshed) {
+                LOG.debug("Served cached Wrapped snapshot", LogContext.of(
+                    "player", playerId,
+                    "season", seasonId,
+                    "generatedAt", snapshot.generatedAt(),
+                    "ageSeconds", (System.currentTimeMillis() - snapshot.generatedAt()) / 1000));
             }
-            snapshot = Optional.of(plugin.getWrappedGenerator().generateAndSave(playerId, seasonId, player.get().lastName()));
+        } else {
+            snapshot = plugin.getWrappedGenerator().generateAndSave(playerId, seasonId, playerName);
+            refreshed = true;
         }
 
         LOG.debug("Served Wrapped snapshot", LogContext.of(
-            "player", playerId, "season", seasonId, "achievements", snapshot.get().achievements().size()));
-        ctx.json(snapshot.get());
+            "player", playerId,
+            "season", seasonId,
+            "refreshed", refreshed,
+            "achievements", snapshot.achievements().size()));
+        ctx.json(snapshot);
+    }
+
+    private boolean refreshIfStale(UUID playerId, String seasonId, WrappedSnapshot cached, String playerName) {
+        int interval;
+        try {
+            interval = plugin.getConfigManager().get().webSnapshotRefreshSeconds();
+        } catch (Throwable t) {
+            LOG.error("Could not read web.snapshot-refresh-seconds", t);
+            return false;
+        }
+        if (interval <= 0) {
+            return false;
+        }
+
+        PlayerStats current;
+        try {
+            current = plugin.getDatabase().loadPlayerStats(playerId, seasonId);
+        } catch (Throwable t) {
+            LOG.error("Could not compare Wrapped stats, serving the cached snapshot", t,
+                LogContext.of("player", playerId, "season", seasonId));
+            return false;
+        }
+
+        if (WrappedGenerator.isSnapshotCurrent(cached, current)) {
+            return false;
+        }
+
+        long ageSeconds = (System.currentTimeMillis() - cached.generatedAt()) / 1000;
+        if (ageSeconds < interval) {
+            LOG.trace("Stats changed but the snapshot is still within the refresh interval",
+                LogContext.of("player", playerId, "season", seasonId,
+                    "ageSeconds", ageSeconds, "intervalSeconds", interval));
+            return false;
+        }
+
+        String key = playerId + ":" + seasonId;
+        if (!refreshingSnapshots.add(key)) {
+            LOG.trace("A refresh for this snapshot is already running", LogContext.of(
+                "player", playerId, "season", seasonId));
+            return false;
+        }
+
+        long startedAt = System.currentTimeMillis();
+        try {
+            plugin.getWrappedGenerator().generateAndSave(playerId, seasonId, playerName);
+            LOG.info("Refreshed a stale Wrapped snapshot", LogContext.of(
+                "player", playerId,
+                "season", seasonId,
+                "ageSeconds", ageSeconds,
+                "durationMillis", System.currentTimeMillis() - startedAt));
+            return true;
+        } catch (Throwable t) {
+            LOG.error("Could not refresh a stale Wrapped snapshot, serving the cached one", t,
+                LogContext.of("player", playerId, "season", seasonId));
+            return false;
+        } finally {
+            refreshingSnapshots.remove(key);
+        }
     }
 
     private void handlePlayerStats(Context ctx) {

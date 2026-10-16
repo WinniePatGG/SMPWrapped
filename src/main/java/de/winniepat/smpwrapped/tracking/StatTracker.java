@@ -231,10 +231,10 @@ public class StatTracker implements Listener {
     public void onBlockBreak(BlockBreakEvent event) {
         if (!plugin.getConfigManager().get().trackBlocks()) return;
         Player player = event.getPlayer();
-        if (player.getGameMode() == org.bukkit.GameMode.CREATIVE) return; 
+        if (isIgnoredGameMode(player)) return;
 
         Material material = event.getBlock().getType();
-        if (material.isAir()) return;
+        if (isAir(material)) return;
 
         PlayerStats stats = markDirty(player.getUniqueId());
         stats.addBlocksMined(1);
@@ -245,13 +245,26 @@ public class StatTracker implements Listener {
     public void onBlockPlace(BlockPlaceEvent event) {
         if (!plugin.getConfigManager().get().trackBlocks()) return;
         Player player = event.getPlayer();
+        if (isIgnoredGameMode(player)) return;
 
         Material material = event.getBlock().getType();
-        if (material.isAir()) return;
+        if (isAir(material)) return;
 
         PlayerStats stats = markDirty(player.getUniqueId());
         stats.addBlocksPlaced(1);
         stats.addBlockPlaced(material.name(), 1);
+    }
+
+    private boolean isIgnoredGameMode(Player player) {
+        if (!plugin.getConfigManager().get().ignoreCreativeBlocks()) {
+            return false;
+        }
+        GameMode gameMode = player.getGameMode();
+        return gameMode == GameMode.CREATIVE || gameMode == GameMode.SPECTATOR;
+    }
+
+    private static boolean isAir(Material material) {
+        return material == Material.AIR || material == Material.CAVE_AIR || material == Material.VOID_AIR;
     }
 
     

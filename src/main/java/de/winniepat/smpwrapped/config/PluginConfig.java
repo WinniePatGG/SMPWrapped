@@ -31,12 +31,14 @@ public record PluginConfig(
     boolean trackDimensions,
     boolean trackSessions,
     boolean trackAchievements,
+    boolean ignoreCreativeBlocks,
 
     
     int autosaveIntervalSeconds,
 
     
     int webCacheSeconds,
+    int webSnapshotRefreshSeconds,
 
     
     int rateLimitRequestsPerMinute,

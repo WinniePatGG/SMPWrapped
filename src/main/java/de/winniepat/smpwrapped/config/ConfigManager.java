@@ -58,10 +58,12 @@ public final class ConfigManager {
         cfg.addDefault("tracking.dimensions", true);
         cfg.addDefault("tracking.sessions", true);
         cfg.addDefault("tracking.achievements", true);
+        cfg.addDefault("tracking.ignore-creative", true);
 
         cfg.addDefault("autosave.interval-seconds", 30);
 
         cfg.addDefault("web.cache-seconds", 300);
+        cfg.addDefault("web.snapshot-refresh-seconds", 30);
 
         cfg.addDefault("rate-limit.requests-per-minute", 60);
 
@@ -124,6 +126,11 @@ public final class ConfigManager {
         int cache = cfg.getInt("web.cache-seconds", 300);
         if (cache < 0) {
             errors.add("web.cache-seconds must be non-negative");
+        }
+
+        int snapshotRefresh = cfg.getInt("web.snapshot-refresh-seconds", 30);
+        if (snapshotRefresh < 0) {
+            errors.add("web.snapshot-refresh-seconds must not be negative");
         }
 
         int rateLimit = cfg.getInt("rate-limit.requests-per-minute", 60);
@@ -234,8 +241,10 @@ public final class ConfigManager {
             cfg.getBoolean("tracking.dimensions", true),
             cfg.getBoolean("tracking.sessions", true),
             cfg.getBoolean("tracking.achievements", true),
+            cfg.getBoolean("tracking.ignore-creative", true),
             autosave,
             cache,
+            snapshotRefresh,
             rateLimit,
             adminToken,
             cfg.getBoolean("leaderboard.public", true),

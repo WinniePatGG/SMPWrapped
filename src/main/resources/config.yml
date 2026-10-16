@@ -12,6 +12,11 @@ web:
   public-base-url: http://localhost:8080
   # Cache duration for web responses (seconds)
   cache-seconds: 300
+  # When a player opens their Wrapped, it is compared against their live stats.
+  # If anything changed, the snapshot is rebuilt automatically, but at most once
+  # every N seconds so repeated reloads cannot hammer the database.
+  # Set to 0 to always serve the stored snapshot and only rebuild on schedule.
+  snapshot-refresh-seconds: 30
 
 # Database settings
 database:
@@ -42,6 +47,9 @@ tracking:
   dimensions: true
   sessions: true
   achievements: true
+  # Ignore blocks mined and placed in Creative and Spectator mode.
+  # Applied to mining and placing so creative building cannot inflate the stats.
+  ignore-creative: true
 
 # Autosave interval (seconds)
 # How often changed stats are written to the database. Only players whose stats

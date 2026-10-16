@@ -123,6 +123,32 @@ public class WrappedGenerator {
         );
     }
 
+    public static boolean isSnapshotCurrent(WrappedSnapshot snapshot, PlayerStats stats) {
+        if (snapshot == null || stats == null) {
+            return false;
+        }
+        Map<String, Object> map = snapshot.stats();
+        return matches(map, "playtimeSeconds", stats.getPlaytimeSeconds())
+            && matches(map, "blocksMined", stats.getBlocksMined())
+            && matches(map, "blocksPlaced", stats.getBlocksPlaced())
+            && matches(map, "distanceTraveled", stats.getDistanceTraveled())
+            && matches(map, "mobsKilled", stats.getMobsKilled())
+            && matches(map, "deaths", stats.getDeaths())
+            && matches(map, "damageDealt", stats.getDamageDealt())
+            && matches(map, "damageReceived", stats.getDamageReceived())
+            && matches(map, "itemsCrafted", stats.getItemsCrafted())
+            && matches(map, "itemsCollected", stats.getItemsCollected())
+            && matches(map, "fishingCatches", stats.getFishingCatches())
+            && matches(map, "loginSessions", stats.getLoginSessions())
+            && matches(map, "uniqueDaysPlayed",
+                Math.max(stats.getUniqueDaysPlayed(), stats.getDailyPlaytime().size()));
+    }
+
+    private static boolean matches(Map<String, Object> map, String key, long expected) {
+        Object raw = map.get(key);
+        return raw instanceof Number number && number.longValue() == expected;
+    }
+
     private List<String> generateMilestones(PlayerStats stats) {
         List<String> milestones = new ArrayList<>();
         if (stats.getPlaytimeSeconds() > 0) {
