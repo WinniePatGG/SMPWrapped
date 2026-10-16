@@ -14,6 +14,9 @@ import {
   formatHour,
   formatHours,
   formatNumber,
+  parseAchievement,
+  achievementIcon,
+  TIER_STYLES,
 } from '../lib/wrapped'
 
 const AUTO_MS = 7000
@@ -39,7 +42,7 @@ export default function WrappedPage() {
   const [paused, setPaused] = useState(false)
   const [progress, setProgress] = useState(0)
 
-  // Load season -> player -> wrapped snapshot.
+  
   useEffect(() => {
     if (!playerName) return
     let cancelled = false
@@ -92,7 +95,7 @@ export default function WrappedPage() {
 
   const goToDashboard = useCallback(() => setView('dashboard'), [])
 
-  // Auto-advance through the story like Spotify Wrapped.
+  
   useEffect(() => {
     if (view !== 'story' || paused) return
     if (currentSlide >= slides.length - 1) return
@@ -110,7 +113,7 @@ export default function WrappedPage() {
     }
   }, [progress, currentSlide, slides.length, goNext])
 
-  // Keyboard navigation.
+  
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (view !== 'story') return
@@ -129,7 +132,7 @@ export default function WrappedPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [view, currentSlide, slides.length, goNext, goPrev, goToDashboard, navigate])
 
-  // Swipe navigation.
+  
   useEffect(() => {
     let startX = 0
     const onStart = (e: TouchEvent) => {
@@ -200,7 +203,7 @@ export default function WrappedPage() {
         </motion.div>
       </AnimatePresence>
 
-      {/* Top bar: progress segments + controls */}
+      {}
       <div className="absolute top-0 inset-x-0 z-30 px-4 pt-4 pb-8 bg-gradient-to-b from-black/50 to-transparent pointer-events-none">
         <div className="max-w-3xl mx-auto flex items-center gap-3 pointer-events-auto">
           <button
@@ -232,7 +235,7 @@ export default function WrappedPage() {
         </div>
       </div>
 
-      {/* Side navigation */}
+      {}
       {currentSlide > 0 && (
         <button
           onClick={goPrev}
@@ -252,7 +255,7 @@ export default function WrappedPage() {
         </button>
       )}
 
-      {/* Bottom hint */}
+      {}
       <div className="absolute bottom-0 inset-x-0 z-30 py-5 text-center pointer-events-none">
         <p className="text-white/50 text-xs uppercase tracking-[0.3em]">
           {isLast ? 'Tap to open your dashboard' : 'Tap to continue'}
@@ -262,7 +265,7 @@ export default function WrappedPage() {
   )
 }
 
-/* ---------------------------------- slides --------------------------------- */
+
 
 function Slide({ children }: { children: ReactNode }) {
   return <div className="flex flex-col items-center">{children}</div>
@@ -462,18 +465,29 @@ function buildSlides(wrapped: WrappedSnapshot, seasonName: string, onFinish: () 
             {wrapped.achievements.length} achievements
           </h2>
           {wrapped.achievements.length > 0 ? (
-            <div className="flex flex-wrap justify-center gap-3">
-              {wrapped.achievements.map((a, i) => (
-                <motion.span
-                  key={a}
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.2 + i * 0.08 }}
-                  className="px-4 py-2 rounded-full bg-white/15 border border-white/25 text-white text-sm font-medium backdrop-blur-sm"
-                >
-                  {a}
-                </motion.span>
-              ))}
+            <div className="flex flex-wrap justify-center gap-3 max-w-2xl">
+              {wrapped.achievements.slice(0, 8).map((a, i) => {
+                const ach = parseAchievement(a)
+                const Icon = achievementIcon(ach.category)
+                return (
+                  <motion.span
+                    key={a}
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.2 + i * 0.08 }}
+                    className="px-3.5 py-1.5 rounded-full bg-white/10 border border-white/25 text-white text-sm font-medium backdrop-blur-sm flex items-center gap-1.5"
+                    title={ach.description || ach.name}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{ach.name}</span>
+                  </motion.span>
+                )
+              })}
+              {wrapped.achievements.length > 8 && (
+                <span className="px-3.5 py-1.5 rounded-full bg-white/15 border border-white/25 text-white/80 text-sm">
+                  +{wrapped.achievements.length - 8} more in your dashboard
+                </span>
+              )}
             </div>
           ) : (
             <p className="text-white/70 text-lg">Your first achievement is just around the corner.</p>
@@ -507,7 +521,7 @@ function buildSlides(wrapped: WrappedSnapshot, seasonName: string, onFinish: () 
   return slides
 }
 
-/* -------------------------------- fallbacks -------------------------------- */
+
 
 function StoryLoader() {
   return (

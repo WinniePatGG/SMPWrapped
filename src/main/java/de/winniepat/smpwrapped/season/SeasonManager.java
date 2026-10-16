@@ -6,9 +6,7 @@ import de.winniepat.smpwrapped.model.PlayerStats;
 
 import java.util.*;
 
-/**
- * Manages season lifecycle: creation, ending, archiving, and publication.
- */
+
 public class SeasonManager {
 
     private final SMPWrapped plugin;
@@ -17,14 +15,12 @@ public class SeasonManager {
         this.plugin = plugin;
     }
 
-    /**
-     * Create a new season.
-     */
+    
     public Season createSeason(String id, String name) {
         Season season = new Season(id, name, System.currentTimeMillis(), -1, Season.SeasonState.ACTIVE);
         plugin.getDatabase().createSeason(season);
 
-        // If there's a current active season, end it first
+        
         String currentId = plugin.getConfigManager().get().currentSeasonId();
         if (currentId != null && !currentId.isBlank()) {
             plugin.getDatabase().getSeason(currentId).ifPresent(current -> {
@@ -38,9 +34,7 @@ public class SeasonManager {
         return season;
     }
 
-    /**
-     * End a season (archive it).
-     */
+    
     public boolean endSeason(String seasonId) {
         Optional<Season> opt = plugin.getDatabase().getSeason(seasonId);
         if (opt.isEmpty()) return false;
@@ -56,9 +50,7 @@ public class SeasonManager {
         return true;
     }
 
-    /**
-     * Publish a season (make Wrapped pages publicly available).
-     */
+    
     public boolean publishSeason(String seasonId) {
         Optional<Season> opt = plugin.getDatabase().getSeason(seasonId);
         if (opt.isEmpty()) return false;
@@ -68,9 +60,7 @@ public class SeasonManager {
         return true;
     }
 
-    /**
-     * Unpublish a season.
-     */
+    
     public boolean unpublishSeason(String seasonId) {
         Optional<Season> opt = plugin.getDatabase().getSeason(seasonId);
         if (opt.isEmpty()) return false;
@@ -80,35 +70,27 @@ public class SeasonManager {
         return true;
     }
 
-    /**
-     * Get the current active season.
-     */
+    
     public Optional<Season> getCurrentSeason() {
         String currentId = plugin.getConfigManager().get().currentSeasonId();
         return plugin.getDatabase().getSeason(currentId);
     }
 
-    /**
-     * Get all seasons.
-     */
+    
     public List<Season> getAllSeasons() {
         return plugin.getDatabase().getAllSeasons();
     }
 
-    /**
-     * Check if a season exists.
-     */
+    
     public boolean seasonExists(String seasonId) {
         return plugin.getDatabase().getSeason(seasonId).isPresent();
     }
 
-    /**
-     * Switch the current season.
-     */
+    
     public boolean switchSeason(String seasonId) {
         if (!seasonExists(seasonId)) return false;
         plugin.getConfigManager().reload();
-        // Note: In production you'd update the config file here
+        
         plugin.getLogger().info("Switched current season to: " + seasonId);
         return true;
     }

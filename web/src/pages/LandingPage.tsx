@@ -20,7 +20,7 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen relative overflow-hidden flex items-center justify-center px-6">
-      {/* Ambient glow */}
+      {}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -top-40 -left-40 w-[36rem] h-[36rem] rounded-full bg-emerald-500/20 blur-[120px]" />
         <div className="absolute -bottom-40 -right-40 w-[36rem] h-[36rem] rounded-full bg-violet-500/20 blur-[120px]" />

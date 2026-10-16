@@ -3,9 +3,7 @@ package de.winniepat.smpwrapped.web;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Simple in-memory rate limiter.
- */
+
 public class RateLimiter {
     private final int maxRequestsPerMinute;
     private final ConcurrentHashMap<String, Bucket> buckets = new ConcurrentHashMap<>();
@@ -33,7 +31,7 @@ public class RateLimiter {
                 windowStart = now;
                 count.set(0);
             }
-            return count.incrementAndGet() <= 60; // Default 60/min
+            return count.incrementAndGet() <= 60; 
         }
 
         boolean isExpired() {

@@ -16,9 +16,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-/**
- * Manages the embedded Javalin web server and REST API.
- */
+
 public class WebServerManager {
 
     private final SMPWrapped plugin;
@@ -41,11 +39,11 @@ public class WebServerManager {
         rateLimiter = new RateLimiter(config.rateLimitRequestsPerMinute());
         adminAuth = new AdminAuth(plugin);
 
-        // Javalin detects an SLF4J provider by scanning META-INF/services through
-        // the thread context classloader. During plugin enable the TCCL is the
-        // server classloader, which cannot see this plugin's shaded service files,
-        // so Javalin prints a misleading "no logger" banner and trips Paper's
-        // stdout nag. Point the TCCL at the plugin classloader during startup.
+        
+        
+        
+        
+        
         ClassLoader previousTccl = Thread.currentThread().getContextClassLoader();
         Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
         try {
@@ -53,22 +51,22 @@ public class WebServerManager {
                 javalinConfig.jsonMapper(new JavalinJackson());
                 javalinConfig.showJavalinBanner = false;
 
-                // Serve static frontend assets from the JAR
+                
                 File webappDir = new File(plugin.getDataFolder(), "webapp");
                 if (webappDir.exists()) {
                     javalinConfig.staticFiles.add(webappDir.getAbsolutePath(), Location.EXTERNAL);
                 } else {
-                    // Try to extract from JAR
+                    
                     javalinConfig.staticFiles.add("/webapp", Location.CLASSPATH);
                 }
 
-                // SPA fallback: serve index.html for client-side routes. Javalin's
-                // spaRoot runs AFTER endpoint matching and static file handling,
-                // so real assets are served normally and only genuine 404s fall
-                // through to the SPA shell.
+                
+                
+                
+                
                 javalinConfig.spaRoot.addFile("/", "/webapp/index.html", Location.CLASSPATH);
 
-                // CORS - enable for all origins (restricted by reverse proxy in production)
+                
                 javalinConfig.bundledPlugins.enableCors(cors -> {
                     cors.addRule(rule -> {
                         rule.anyHost();
@@ -88,22 +86,22 @@ public class WebServerManager {
     }
 
     private void setupRoutes() {
-        // Health check
+        
         app.get("/api/v1/health", this::handleHealth);
 
-        // Seasons
+        
         app.get("/api/v1/seasons", this::handleSeasons);
         app.get("/api/v1/seasons/current", this::handleCurrentSeason);
         app.get("/api/v1/seasons/{seasonId}/stats", this::handleSeasonStats);
         app.get("/api/v1/seasons/{seasonId}/leaderboards/{stat}", this::handleLeaderboard);
 
-        // Players
+        
         app.get("/api/v1/players/by-name/{playerName}", this::handlePlayerByName);
         app.get("/api/v1/players/{playerId}", this::handlePlayer);
         app.get("/api/v1/players/{playerId}/wrapped/{seasonId}", this::handlePlayerWrapped);
         app.get("/api/v1/players/{playerId}/stats/{seasonId}", this::handlePlayerStats);
 
-        // Admin endpoints (require auth)
+        
         app.post("/api/v1/admin/seasons", this::handleAdminCreateSeason);
         app.post("/api/v1/admin/seasons/{seasonId}/end", this::handleAdminEndSeason);
         app.post("/api/v1/admin/seasons/{seasonId}/publish", this::handleAdminPublishSeason);
@@ -111,11 +109,11 @@ public class WebServerManager {
         app.post("/api/v1/admin/backup", this::handleAdminBackup);
         app.post("/api/v1/admin/rebuild/{playerId}/{seasonId}", this::handleAdminRebuildSnapshot);
 
-        // Unmatched API routes must stay JSON (spaRoot would otherwise serve HTML).
+        
         app.get("/api/<path>", ctx -> ctx.json(Map.of("error", "Not found")).status(HttpStatus.NOT_FOUND));
 
-        // Root serves the SPA shell directly (with a graceful placeholder fallback).
-        // Client-side deep links (e.g. /wrapped/season-1) are handled by spaRoot.
+        
+        
         app.get("/", this::handleRoot);
     }
 
@@ -127,7 +125,7 @@ public class WebServerManager {
         });
     }
 
-    // === Public API handlers ===
+    
 
     private void handleHealth(Context ctx) {
         ctx.json(Map.of(
@@ -186,7 +184,7 @@ public class WebServerManager {
             return;
         }
 
-        // Validate stat name
+        
         Set<String> validStats = Set.of(
             "playtime_seconds", "blocks_mined", "blocks_placed", "distance_traveled",
             "mobs_killed", "deaths", "items_crafted", "fishing_catches", "unique_days"
@@ -204,7 +202,7 @@ public class WebServerManager {
             map.put("rank", rank++);
             map.put("playerId", entry.getKey().toString());
             map.put("value", entry.getValue());
-            // Add player name if available
+            
             plugin.getDatabase().getPlayer(entry.getKey()).ifPresent(p -> map.put("playerName", p.lastName()));
             result.add(map);
         }
@@ -274,7 +272,7 @@ public class WebServerManager {
             return;
         }
 
-        // Check if snapshot exists, generate if not
+        
         Optional<WrappedSnapshot> snapshot = plugin.getDatabase().getWrappedSnapshot(playerId, seasonId);
         if (snapshot.isEmpty()) {
             Optional<TrackedPlayer> player = plugin.getDatabase().getPlayer(playerId);
@@ -322,7 +320,7 @@ public class WebServerManager {
         ctx.json(result);
     }
 
-    // === Admin API handlers ===
+    
 
     private void handleAdminCreateSeason(Context ctx) {
         if (!checkAuth(ctx)) return;
@@ -412,7 +410,7 @@ public class WebServerManager {
         ctx.json(Map.of("message", "Snapshot rebuilt", "playerId", playerId.toString(), "seasonId", seasonId));
     }
 
-    // === Helper methods ===
+    
 
     private boolean checkAuth(Context ctx) {
         String authHeader = ctx.header("Authorization");
@@ -429,15 +427,11 @@ public class WebServerManager {
     }
 
     private void handleRoot(Context ctx) {
-        // Serve index.html for the root; deep links are handled by spaRoot.
+        
         ctx.html(getIndexHtml());
     }
 
-    /**
-     * Loads the built frontend's index.html from the plugin classpath
-     * (/webapp/index.html), caching it. Falls back to a minimal placeholder if the
-     * frontend was not built into the JAR.
-     */
+    
     private String getIndexHtml() {
         String cached = indexHtmlCache;
         if (cached != null) {

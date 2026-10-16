@@ -2,13 +2,11 @@ package de.winniepat.smpwrapped.model;
 
 import java.util.UUID;
 
-/**
- * Represents a login session for playtime tracking.
- */
+
 public record Session(
     UUID playerId,
     long loginTime,
-    long logoutTime,    // -1 if still active
+    long logoutTime,    
     String dimension
 ) {
     public boolean isActive() {

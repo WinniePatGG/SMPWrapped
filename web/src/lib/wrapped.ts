@@ -1,6 +1,74 @@
 import { WrappedSnapshot } from '../api/client'
+import type { LucideIcon } from 'lucide-react'
+import { Trophy, Pickaxe, Hammer, Sword, Heart, Compass, HammerIcon, Fish, Package, Users, Server, Sparkles, Target } from 'lucide-react'
 
-/** Human-readable labels for the percentile stat keys returned by the API. */
+export type AchievementTier = 'BRONZE' | 'SILVER' | 'GOLD' | 'DIAMOND' | 'LEGENDARY'
+
+export interface Achievement {
+  id: string
+  name: string
+  description: string
+  tier: AchievementTier
+  category: string
+}
+
+export function parseAchievement(raw: string): Achievement {
+  if (!raw) {
+    return { id: 'unknown', name: raw, description: '', tier: 'BRONZE', category: 'FUN' }
+  }
+  const parts = raw.split('|')
+  if (parts.length >= 5) {
+    const tier = (parts[3] as AchievementTier) || 'BRONZE'
+    return {
+      id: parts[0] || raw,
+      name: parts[1] || raw,
+      description: parts[2] || '',
+      tier,
+      category: parts[4] || 'FUN',
+    }
+  }
+  return { id: raw, name: raw, description: '', tier: 'BRONZE', category: 'FUN' }
+}
+
+export function achievementIcon(category: string): LucideIcon {
+  switch (category) {
+    case 'MINING':
+      return Pickaxe
+    case 'BUILDING':
+      return Hammer
+    case 'COMBAT':
+      return Sword
+    case 'SURVIVAL':
+      return Heart
+    case 'EXPLORATION':
+      return Compass
+    case 'CRAFTING':
+      return HammerIcon
+    case 'FISHING':
+      return Fish
+    case 'COLLECTION':
+      return Package
+    case 'SOCIAL':
+      return Users
+    case 'SERVER':
+      return Server
+    case 'FUN':
+      return Sparkles
+    case 'ACTIVITY':
+    default:
+      return Trophy
+  }
+}
+
+export const TIER_STYLES: Record<AchievementTier, { label: string; classes: string; border: string; ring: string }> = {
+  BRONZE: { label: 'Bronze', classes: 'bg-amber-800/30 text-amber-300', border: 'border-amber-700/40', ring: 'ring-amber-600/20' },
+  SILVER: { label: 'Silver', classes: 'bg-slate-500/30 text-slate-200', border: 'border-slate-400/40', ring: 'ring-slate-400/20' },
+  GOLD: { label: 'Gold', classes: 'bg-yellow-500/30 text-yellow-200', border: 'border-yellow-400/40', ring: 'ring-yellow-400/20' },
+  DIAMOND: { label: 'Diamond', classes: 'bg-cyan-400/30 text-cyan-200', border: 'border-cyan-400/40', ring: 'ring-cyan-400/20' },
+  LEGENDARY: { label: 'Legendary', classes: 'bg-purple-500/30 text-purple-200', border: 'border-purple-400/40', ring: 'ring-purple-400/20' },
+}
+
+
 export const STAT_LABELS: Record<string, string> = {
   playtime_seconds: 'Playtime',
   blocks_mined: 'Blocks Mined',
@@ -12,11 +80,7 @@ export const STAT_LABELS: Record<string, string> = {
   unique_days: 'Days Played',
 }
 
-/**
- * The API reports the percentage of players you beat (0-100). The intuitive
- * "you're in the top X%" phrasing is the inverse, so convert and clamp to a
- * sane 1-99 range.
- */
+
 export function topPercent(percentile: number): number {
   return Math.min(99, Math.max(1, Math.round(100 - percentile)))
 }
@@ -39,7 +103,7 @@ export function formatDuration(seconds?: number): string {
   return `${m}m`
 }
 
-/** Turn a 0-23 hour into a friendly label like "9PM". */
+
 export function formatHour(hour?: number): string {
   if (hour == null) return ''
   const h = ((Math.round(hour) % 24) + 24) % 24
@@ -48,7 +112,7 @@ export function formatHour(hour?: number): string {
   return `${twelve}${suffix}`
 }
 
-/** Turn a stored day key into something readable, falling back to the raw value. */
+
 export function formatDay(day?: string): string {
   if (!day) return ''
   const d = new Date(day)
@@ -56,7 +120,7 @@ export function formatDay(day?: string): string {
   return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
 }
 
-/** The single best percentile the player earned, or null when unavailable. */
+
 export function bestPercentile(
   percentiles: Record<string, number>
 ): { key: string; label: string; percentile: number; top: number } | null {
@@ -69,13 +133,13 @@ export function bestPercentile(
 export interface StatDef {
   key: string
   label: string
-  /** Renders the value as a display string. */
+  
   format: (stats: WrappedSnapshot['stats']) => string
-  /** Optional secondary line (context such as the top block or mob). */
+  
   sub?: (stats: WrappedSnapshot['stats']) => string | null
 }
 
-/** Every tracked number, in the order we want to present them. */
+
 export const STAT_DEFS: StatDef[] = [
   {
     key: 'playtimeSeconds',

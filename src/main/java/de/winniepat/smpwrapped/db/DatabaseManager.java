@@ -10,10 +10,6 @@ import java.sql.*;
 import java.util.*;
 import java.util.concurrent.*;
 
-/**
- * Manages SQLite database connections via HikariCP.
- * Provides async query execution and schema migrations.
- */
 public class DatabaseManager {
 
     private final SMPWrapped plugin;
@@ -38,7 +34,6 @@ public class DatabaseManager {
         config.setMaxLifetime(1800000);
         config.setPoolName("SMPWrapped-Pool");
 
-        // SQLite optimizations
         config.addDataSourceProperty("cache_size", "8000");
         config.addDataSourceProperty("synchronous", "NORMAL");
         config.addDataSourceProperty("journal_mode", "WAL");
@@ -63,9 +58,7 @@ public class DatabaseManager {
         return dataSource.getConnection();
     }
 
-    /**
-     * Run a database operation asynchronously.
-     */
+    
     public <T> CompletableFuture<T> supplyAsync(Callable<T> task) {
         return CompletableFuture.supplyAsync(() -> {
             try {
@@ -76,9 +69,7 @@ public class DatabaseManager {
         }, asyncExecutor);
     }
 
-    /**
-     * Run a database operation asynchronously (no return).
-     */
+    
     public CompletableFuture<Void> runAsync(Runnable task) {
         return CompletableFuture.runAsync(() -> {
             try {
@@ -93,7 +84,7 @@ public class DatabaseManager {
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement()) {
 
-            // Players table
+            
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS players (
                     uuid TEXT PRIMARY KEY,
@@ -104,7 +95,7 @@ public class DatabaseManager {
                 )
             """);
 
-            // Seasons table
+            
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS seasons (
                     id TEXT PRIMARY KEY,
@@ -115,7 +106,7 @@ public class DatabaseManager {
                 )
             """);
 
-            // Player season stats table
+            
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS player_season_stats (
                     player_uuid TEXT NOT NULL,
@@ -127,7 +118,7 @@ public class DatabaseManager {
                 )
             """);
 
-            // Sessions table
+            
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,7 +129,7 @@ public class DatabaseManager {
                 )
             """);
 
-            // Wrapped snapshots table
+            
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS wrapped_snapshots (
                     player_uuid TEXT NOT NULL,
@@ -149,7 +140,7 @@ public class DatabaseManager {
                 )
             """);
 
-            // Achievements table
+            
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS achievements (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,7 +152,7 @@ public class DatabaseManager {
                 )
             """);
 
-            // Indexes
+            
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_stats_season ON player_season_stats(season_id)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_stats_player ON player_season_stats(player_uuid)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_sessions_player ON sessions(player_uuid)");
@@ -175,7 +166,7 @@ public class DatabaseManager {
         }
     }
 
-    // === Player operations ===
+    
 
     public void upsertPlayer(TrackedPlayer player) {
         runAsync(() -> {
@@ -252,7 +243,7 @@ public class DatabaseManager {
         });
     }
 
-    // === Season operations ===
+    
 
     public void createSeason(Season season) {
         runAsync(() -> {
@@ -341,7 +332,7 @@ public class DatabaseManager {
         });
     }
 
-    // === Stats operations ===
+    
 
     public void savePlayerStats(PlayerStats stats) {
         runAsync(() -> {
@@ -362,7 +353,7 @@ public class DatabaseManager {
                     saveStat(conn, stats.getPlayerId().toString(), stats.getSeasonId(), "login_sessions", stats.getLoginSessions());
                     saveStat(conn, stats.getPlayerId().toString(), stats.getSeasonId(), "unique_days", stats.getUniqueDaysPlayed());
 
-                    // Map-type stats as JSON
+                    
                     saveMapStat(conn, stats.getPlayerId().toString(), stats.getSeasonId(), "dimension_time", stats.getDimensionTime());
                     saveMapStat(conn, stats.getPlayerId().toString(), stats.getSeasonId(), "blocks_mined_by_type", stats.getBlocksMinedByType());
                     saveMapStat(conn, stats.getPlayerId().toString(), stats.getSeasonId(), "blocks_placed_by_type", stats.getBlocksPlacedByType());
@@ -403,7 +394,7 @@ public class DatabaseManager {
         }
     }
 
-    /** Convert an integer-keyed map (e.g. hour of day) into the string-keyed form used by JSON storage. */
+    
     private Map<String, Long> toStringKeyed(Map<Integer, Long> map) {
         Map<String, Long> out = new LinkedHashMap<>();
         map.forEach((k, v) -> out.put(String.valueOf(k), v));
@@ -485,7 +476,7 @@ public class DatabaseManager {
                 try {
                     stats.addHourlyPlaytime(Integer.parseInt(hour), seconds);
                 } catch (NumberFormatException ignored) {
-                    // Skip malformed keys
+                    
                 }
             });
         }
@@ -494,12 +485,12 @@ public class DatabaseManager {
     private Map<String, Long> parseJsonMap(String json) {
         Map<String, Long> map = new HashMap<>();
         if (json == null || json.isBlank() || json.equals("{}")) return map;
-        // Simple JSON parser for flat string->long maps
+        
         String trimmed = json.trim();
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             trimmed = trimmed.substring(1, trimmed.length() - 1);
         }
-        // Split on commas not inside quotes
+        
         StringBuilder current = new StringBuilder();
         boolean inQuotes = false;
         List<String> pairs = new ArrayList<>();
@@ -527,7 +518,7 @@ public class DatabaseManager {
         return map;
     }
 
-    // === Leaderboard queries ===
+    
 
     public List<Map.Entry<UUID, Long>> getLeaderboard(String seasonId, String statKey, int limit) {
         List<Map.Entry<UUID, Long>> results = new ArrayList<>();
@@ -569,7 +560,7 @@ public class DatabaseManager {
         return results;
     }
 
-    // === Session operations ===
+    
 
     public void startSession(Session session) {
         runAsync(() -> {
@@ -601,7 +592,7 @@ public class DatabaseManager {
         });
     }
 
-    // === Wrapped snapshot operations ===
+    
 
     public void saveWrappedSnapshot(WrappedSnapshot snapshot) {
         runAsync(() -> {
@@ -685,7 +676,7 @@ public class DatabaseManager {
     }
 
     private WrappedSnapshot jsonToSnapshot(String json) {
-        // Simple JSON parser for snapshot
+        
         Map<String, Object> map = parseJsonObject(json);
         UUID playerId = UUID.fromString((String) map.get("playerId"));
         String seasonId = (String) map.get("seasonId");
@@ -708,9 +699,9 @@ public class DatabaseManager {
     }
 
     private Map<String, Object> parseJsonObject(String json) {
-        // Minimal JSON parser - handles our snapshot format
+        
         Map<String, Object> result = new HashMap<>();
-        // For production, use Jackson. This is a simple fallback.
+        
         json = json.trim();
         if (json.startsWith("{")) json = json.substring(1);
         if (json.endsWith("}")) json = json.substring(0, json.length() - 1);
@@ -788,7 +779,7 @@ public class DatabaseManager {
         return list;
     }
 
-    // === Achievements ===
+    
 
     public void saveAchievement(UUID playerId, String seasonId, String achievementKey) {
         runAsync(() -> {
@@ -824,7 +815,7 @@ public class DatabaseManager {
         return achievements;
     }
 
-    // === Server-wide stats ===
+    
 
     public Map<String, Long> getServerWideStats(String seasonId) {
         Map<String, Long> stats = new HashMap<>();
@@ -850,7 +841,7 @@ public class DatabaseManager {
         return stats;
     }
 
-    // === Backup ===
+    
 
     public File createBackup() {
         try {

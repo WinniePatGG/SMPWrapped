@@ -2,19 +2,16 @@ package de.winniepat.smpwrapped.model;
 
 import java.util.*;
 
-/**
- * Aggregated statistics for a player within a season.
- * All counters are long to avoid overflow.
- */
+
 public class PlayerStats {
     private final UUID playerId;
     private final String seasonId;
 
-    // Core stats
+    
     private long playtimeSeconds;
     private long blocksMined;
     private long blocksPlaced;
-    private long distanceTraveled; // in blocks
+    private long distanceTraveled; 
     private long mobsKilled;
     private long deaths;
     private long damageDealt;
@@ -25,20 +22,20 @@ public class PlayerStats {
     private long loginSessions;
     private long uniqueDaysPlayed;
 
-    // Dimension time (dimension -> seconds)
+    
     private final Map<String, Long> dimensionTime = new HashMap<>();
 
-    // Block breakdown (material -> count)
+    
     private final Map<String, Long> blocksMinedByType = new HashMap<>();
     private final Map<String, Long> blocksPlacedByType = new HashMap<>();
 
-    // Mob breakdown (entity type -> count)
+    
     private final Map<String, Long> mobsKilledByType = new HashMap<>();
 
-    // Daily activity (day -> seconds)
+    
     private final Map<String, Long> dailyPlaytime = new HashMap<>();
 
-    // Hourly activity (hour 0-23 -> seconds)
+    
     private final Map<Integer, Long> hourlyPlaytime = new HashMap<>();
 
     public PlayerStats(UUID playerId, String seasonId) {
@@ -46,7 +43,7 @@ public class PlayerStats {
         this.seasonId = seasonId;
     }
 
-    // Getters
+    
     public UUID getPlayerId() { return playerId; }
     public String getSeasonId() { return seasonId; }
     public long getPlaytimeSeconds() { return playtimeSeconds; }
@@ -69,7 +66,7 @@ public class PlayerStats {
     public Map<String, Long> getDailyPlaytime() { return Collections.unmodifiableMap(dailyPlaytime); }
     public Map<Integer, Long> getHourlyPlaytime() { return Collections.unmodifiableMap(hourlyPlaytime); }
 
-    // Increment methods
+    
     public void addPlaytime(long seconds) { this.playtimeSeconds += seconds; }
     public void addBlocksMined(long count) { this.blocksMined += count; }
     public void addBlocksPlaced(long count) { this.blocksPlaced += count; }
@@ -108,9 +105,7 @@ public class PlayerStats {
         hourlyPlaytime.merge(hour, seconds, Long::sum);
     }
 
-    /**
-     * Merge another PlayerStats into this one.
-     */
+    
     public void merge(PlayerStats other) {
         if (!this.playerId.equals(other.playerId) || !this.seasonId.equals(other.seasonId)) {
             throw new IllegalArgumentException("Cannot merge stats from different player/season");
@@ -136,41 +131,31 @@ public class PlayerStats {
         other.hourlyPlaytime.forEach((k, v) -> this.hourlyPlaytime.merge(k, v, Long::sum));
     }
 
-    /**
-     * Get the most mined block type, or empty if none.
-     */
+    
     public Optional<Map.Entry<String, Long>> getTopMinedBlock() {
         return blocksMinedByType.entrySet().stream()
             .max(Map.Entry.comparingByValue());
     }
 
-    /**
-     * Get the most killed mob type, or empty if none.
-     */
+    
     public Optional<Map.Entry<String, Long>> getTopMob() {
         return mobsKilledByType.entrySet().stream()
             .max(Map.Entry.comparingByValue());
     }
 
-    /**
-     * Get the most active dimension, or empty if none.
-     */
+    
     public Optional<Map.Entry<String, Long>> getTopDimension() {
         return dimensionTime.entrySet().stream()
             .max(Map.Entry.comparingByValue());
     }
 
-    /**
-     * Get the most active day, or empty if none.
-     */
+    
     public Optional<Map.Entry<String, Long>> getTopDay() {
         return dailyPlaytime.entrySet().stream()
             .max(Map.Entry.comparingByValue());
     }
 
-    /**
-     * Get the most active hour, or empty if none.
-     */
+    
     public Optional<Map.Entry<Integer, Long>> getTopHour() {
         return hourlyPlaytime.entrySet().stream()
             .max(Map.Entry.comparingByValue());

@@ -91,7 +91,7 @@ class PercentileCalculatorTest {
         allStats.put(player1Id, stats1);
         allStats.put(player2Id, stats2);
 
-        // Only 2 players, minimum sample size is 3
+        
         Map<String, Double> percentiles = PercentileCalculator.calculatePercentiles(stats1, allStats);
         assertThat(percentiles).isEmpty();
     }

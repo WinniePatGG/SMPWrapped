@@ -2,24 +2,21 @@ package de.winniepat.smpwrapped.config;
 
 import java.util.*;
 
-/**
- * Immutable configuration holder for SMPWrapped.
- * Loaded and validated by {@link ConfigManager}.
- */
+
 public record PluginConfig(
-    // Web server
+    
     boolean webEnabled,
     String webHost,
     int webPort,
     String publicBaseUrl,
 
-    // Database
+    
     String databasePath,
 
-    // Current season
+    
     String currentSeasonId,
 
-    // Tracking toggles
+    
     boolean trackPlaytime,
     boolean trackBlocks,
     boolean trackDistance,
@@ -32,39 +29,50 @@ public record PluginConfig(
     boolean trackSessions,
     boolean trackAchievements,
 
-    // Autosave
+    
     int autosaveIntervalSeconds,
 
-    // Web cache
+    
     int webCacheSeconds,
 
-    // Rate limiting
+    
     int rateLimitRequestsPerMinute,
 
-    // Admin
+    
     String adminToken,
 
-    // Leaderboard
+    
     boolean leaderboardsPublic,
     int leaderboardMinSampleSize,
 
-    // Privacy
+    
     boolean playerProfilesPublic,
     boolean allowPlayerOptOut,
 
-    // Avatars
+    
     String avatarUrlTemplate,
 
-    // Branding
+    
     String serverName,
     String serverIconUrl,
 
-    // Share card
+    
     boolean shareCardEnabled,
     String shareCardFooter,
 
-    // Publication
-    boolean autoPublishOnEnd
+    
+    boolean autoPublishOnEnd,
+
+    
+    boolean weeklyWrappedEnabled,
+    int weeklyWrappedDayOfWeek,   
+    int weeklyWrappedHour,        
+    int weeklyWrappedMinute,      
+
+    boolean monthlyWrappedEnabled,
+    int monthlyWrappedDay,        
+    int monthlyWrappedHour,
+    int monthlyWrappedMinute
 ) {
     public PluginConfig {
         Objects.requireNonNull(webHost, "webHost");

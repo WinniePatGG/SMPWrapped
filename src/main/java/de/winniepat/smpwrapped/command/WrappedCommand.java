@@ -10,9 +10,7 @@ import org.bukkit.entity.Player;
 
 import java.util.*;
 
-/**
- * Handles all /wrapped commands with tab completion.
- */
+
 public class WrappedCommand implements CommandExecutor, TabCompleter {
 
     private final SMPWrapped plugin;
@@ -161,7 +159,7 @@ public class WrappedCommand implements CommandExecutor, TabCompleter {
                     return;
                 }
                 String playerName = args[2];
-                // Find player by name
+                
                 plugin.getDatabase().getAllPlayers().stream()
                     .filter(p -> p.lastName().equalsIgnoreCase(playerName))
                     .findFirst()

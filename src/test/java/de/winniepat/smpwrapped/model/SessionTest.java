@@ -12,7 +12,7 @@ class SessionTest {
     @DisplayName("Should calculate duration correctly for ended session")
     void testEndedSessionDuration() {
         long loginTime = 1000000L;
-        long logoutTime = 1003600L; // 3.6 seconds later
+        long logoutTime = 1003600L; 
         Session session = new Session(UUID.randomUUID(), loginTime, logoutTime, "OVERWORLD");
 
         assertThat(session.durationSeconds()).isEqualTo(3);

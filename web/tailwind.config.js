@@ -1,4 +1,4 @@
-/** @type {import('tailwindcss').Config} */
+
 export default {
   content: [
     "./index.html",
@@ -7,7 +7,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Core palette
+        
         surface: {
           950: '#0a0e14',
           900: '#0f1419',
@@ -19,7 +19,7 @@ export default {
           400: '#64748b',
           300: '#94a3b8',
         },
-        // Accent colors
+        
         emerald: {
           400: '#34d399',
           500: '#10b981',

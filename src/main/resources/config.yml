@@ -79,3 +79,20 @@ share-card:
 # Publication settings
 publication:
   auto-publish-on-end: false
+
+# Scheduled automatic Wrapped generation.
+# Times use the server's local time zone. If the server is offline when a run
+# is due, it will be generated shortly after the next startup.
+schedule:
+  weekly:
+    enabled: true
+    # Day of the week: MONDAY, TUESDAY, ... SUNDAY (or 1-7 where 1 = Monday)
+    day: MONDAY
+    # 24-hour time, HH:mm
+    time: "20:00"
+  monthly:
+    enabled: true
+    # Day of the month (1-31). In shorter months it runs on the last day.
+    day: 1
+    # 24-hour time, HH:mm
+    time: "20:00"

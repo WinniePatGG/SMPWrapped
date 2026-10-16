@@ -99,21 +99,21 @@ export interface ServerStats {
 }
 
 export const api = {
-  // Health
+  
   health: () => fetchApi<{ status: string; version: string }>('/health'),
 
-  // Seasons
+  
   getSeasons: () => fetchApi<{ seasons: Season[] }>('/seasons'),
   getCurrentSeason: () => fetchApi<Season>('/seasons/current'),
   getSeasonStats: (seasonId: string) => fetchApi<ServerStats>(`/seasons/${seasonId}/stats`),
 
-  // Leaderboards
+  
   getLeaderboard: (seasonId: string, stat: string) =>
     fetchApi<{ seasonId: string; stat: string; leaderboard: LeaderboardEntry[] }>(
       `/seasons/${seasonId}/leaderboards/${stat}`
     ),
 
-  // Players
+  
   getPlayer: (playerId: string) => fetchApi<Player>(`/players/${playerId}`),
   getPlayerByName: (playerName: string) => fetchApi<Player>(`/players/by-name/${encodeURIComponent(playerName)}`),
   getPlayerStats: (playerId: string, seasonId: string) =>

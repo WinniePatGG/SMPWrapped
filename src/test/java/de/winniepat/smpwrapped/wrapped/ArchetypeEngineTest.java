@@ -21,7 +21,7 @@ class ArchetypeEngineTest {
     @DisplayName("Should return The Miner for high block mining")
     void testMinerArchetype() {
         PlayerStats stats = new PlayerStats(UUID.randomUUID(), "season-1");
-        stats.addPlaytime(3600); // 1 hour
+        stats.addPlaytime(3600); 
         stats.addBlocksMined(5000);
         stats.addBlocksPlaced(100);
         stats.addMobsKilled(10);
@@ -70,7 +70,7 @@ class ArchetypeEngineTest {
     @DisplayName("Should return The Survivor for low death ratio")
     void testSurvivorArchetype() {
         PlayerStats stats = new PlayerStats(UUID.randomUUID(), "season-1");
-        stats.addPlaytime(36000); // 10 hours
+        stats.addPlaytime(36000); 
         stats.addDeath();
         stats.addBlocksMined(100);
 

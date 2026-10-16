@@ -1,20 +1,18 @@
 package de.winniepat.smpwrapped.model;
 
-/**
- * Represents a season in the SMP.
- */
+
 public record Season(
     String id,
     String name,
     long startTime,
-    long endTime,       // -1 if still active
+    long endTime,       
     SeasonState state
 ) {
     public enum SeasonState {
-        ACTIVE,     // Currently running
-        ENDED,      // Finished but not yet published
-        ARCHIVED,   // Finished and published/archived
-        DRAFT       // Created but not yet started
+        ACTIVE,     
+        ENDED,      
+        ARCHIVED,   
+        DRAFT       
     }
 
     public boolean isActive() {

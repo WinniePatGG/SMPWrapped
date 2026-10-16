@@ -48,7 +48,7 @@ export default function WrappedDashboard({ wrapped, seasonName, onReplay }: Prop
         })
         return
       } catch {
-        /* user cancelled */
+        
       }
     }
     handleCopy()
@@ -86,14 +86,14 @@ export default function WrappedDashboard({ wrapped, seasonName, onReplay }: Prop
 
   return (
     <div className="min-h-screen relative overflow-x-hidden">
-      {/* Ambient glow */}
+      {}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute -top-52 -left-52 w-[40rem] h-[40rem] rounded-full bg-emerald-500/10 blur-[140px]" />
         <div className="absolute top-1/3 -right-52 w-[40rem] h-[40rem] rounded-full bg-violet-500/10 blur-[140px]" />
       </div>
 
       <div className="relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
-        {/* Toolbar */}
+        {}
         <div className="flex items-center justify-between mb-10">
           <Link
             to="/"
@@ -127,7 +127,7 @@ export default function WrappedDashboard({ wrapped, seasonName, onReplay }: Prop
           </div>
         </div>
 
-        {/* Hero */}
+        {}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -157,7 +157,7 @@ export default function WrappedDashboard({ wrapped, seasonName, onReplay }: Prop
 
         <p className="text-surface-300 text-lg max-w-2xl leading-relaxed mb-12">{wrapped.archetypeDescription}</p>
 
-        {/* By the numbers */}
+        {}
         <Section title="By the numbers" subtitle="Everything you racked up this season">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {STAT_DEFS.map((def, i) => {
@@ -182,7 +182,7 @@ export default function WrappedDashboard({ wrapped, seasonName, onReplay }: Prop
           </div>
         </Section>
 
-        {/* Rankings */}
+        {}
         <Section title="How you rank" subtitle="Compared to every other player this season">
           {percentiles.length > 0 ? (
             <div className="glass-card p-6 space-y-5">
@@ -214,7 +214,7 @@ export default function WrappedDashboard({ wrapped, seasonName, onReplay }: Prop
           )}
         </Section>
 
-        {/* Highlights */}
+        {}
         {highlights.length > 0 && (
           <Section title="Season highlights" subtitle="The moments and habits that stood out">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -241,7 +241,7 @@ export default function WrappedDashboard({ wrapped, seasonName, onReplay }: Prop
           </Section>
         )}
 
-        {/* Achievements & milestones */}
+        {}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-16">
           <div className="glass-card p-6">
             <h3 className="font-display font-bold text-xl mb-5 flex items-center gap-2">
@@ -253,7 +253,7 @@ export default function WrappedDashboard({ wrapped, seasonName, onReplay }: Prop
                 {wrapped.achievements.map(a => (
                   <span
                     key={a}
-                    className="px-3.5 py-1.5 rounded-full bg-gold-500/10 border border-gold-500/20 text-gold-400 text-sm font-medium"
+                    className="px-3.5 py-1.5 rounded-full  border  ring-1  text-sm font-medium"
                   >
                     {a}
                   </span>

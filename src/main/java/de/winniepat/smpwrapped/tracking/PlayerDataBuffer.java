@@ -6,14 +6,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
-/**
- * Thread-safe in-memory buffer for accumulating player statistics.
- * Periodically flushed to the database.
- *
- * <p>When a player is seen for the first time in a session, their previously
- * persisted stats are loaded via the supplied loader so counters accumulate
- * across server restarts instead of resetting.</p>
- */
+
 public class PlayerDataBuffer {
     private final ConcurrentHashMap<UUID, PlayerStats> buffers = new ConcurrentHashMap<>();
     private final String seasonId;
@@ -31,7 +24,7 @@ public class PlayerDataBuffer {
         });
     }
 
-    /** True if a buffer already exists for this player (avoids a DB load). */
+    
     public boolean hasBuffer(UUID playerId) {
         return buffers.containsKey(playerId);
     }

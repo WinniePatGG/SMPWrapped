@@ -3,11 +3,10 @@ package de.winniepat.smpwrapped.config;
 import de.winniepat.smpwrapped.SMPWrapped;
 import org.bukkit.configuration.file.FileConfiguration;
 
+import java.time.DayOfWeek;
 import java.util.*;
 
-/**
- * Loads, validates, and provides access to plugin configuration.
- */
+
 public final class ConfigManager {
 
     private final SMPWrapped plugin;
@@ -21,7 +20,7 @@ public final class ConfigManager {
         plugin.saveDefaultConfig();
         FileConfiguration cfg = plugin.getConfig();
 
-        // Ensure defaults exist
+        
         cfg.addDefault("web.enabled", true);
         cfg.addDefault("web.host", "127.0.0.1");
         cfg.addDefault("web.port", 8080);
@@ -67,10 +66,17 @@ public final class ConfigManager {
 
         cfg.addDefault("publication.auto-publish-on-end", false);
 
+        cfg.addDefault("schedule.weekly.enabled", true);
+        cfg.addDefault("schedule.weekly.day", "MONDAY");
+        cfg.addDefault("schedule.weekly.time", "20:00");
+        cfg.addDefault("schedule.monthly.enabled", true);
+        cfg.addDefault("schedule.monthly.day", 1);
+        cfg.addDefault("schedule.monthly.time", "20:00");
+
         cfg.options().copyDefaults(true);
         plugin.saveConfig();
 
-        // Validate
+        
         List<String> errors = new ArrayList<>();
 
         int port = cfg.getInt("web.port", 8080);
@@ -108,11 +114,20 @@ public final class ConfigManager {
             errors.add("database.path must not be empty");
         }
 
+        
+        int weeklyDay = parseDayOfWeek(cfg.getString("schedule.weekly.day", "MONDAY"), errors);
+        int[] weeklyTime = parseTime(cfg.getString("schedule.weekly.time", "20:00"), "schedule.weekly.time", errors);
+        int monthlyDay = cfg.getInt("schedule.monthly.day", 1);
+        if (monthlyDay < 1 || monthlyDay > 31) {
+            errors.add("schedule.monthly.day must be between 1 and 31");
+        }
+        int[] monthlyTime = parseTime(cfg.getString("schedule.monthly.time", "20:00"), "schedule.monthly.time", errors);
+
         String adminToken = cfg.getString("admin.token", "");
         boolean generatedNewToken = false;
         if (adminToken == null || adminToken.isBlank()) {
-            // No token configured (the shipped config ships an empty value, so
-            // addDefault never applies). Generate one and persist it.
+            
+            
             adminToken = UUID.randomUUID().toString().replace("-", "");
             cfg.set("admin.token", adminToken);
             plugin.saveConfig();
@@ -157,7 +172,15 @@ public final class ConfigManager {
             cfg.getString("branding.server-icon-url", ""),
             cfg.getBoolean("share-card.enabled", true),
             cfg.getString("share-card.footer", "Wrapped with SMPWrapped"),
-            cfg.getBoolean("publication.auto-publish-on-end", false)
+            cfg.getBoolean("publication.auto-publish-on-end", false),
+            cfg.getBoolean("schedule.weekly.enabled", true),
+            weeklyDay,
+            weeklyTime[0],
+            weeklyTime[1],
+            cfg.getBoolean("schedule.monthly.enabled", true),
+            monthlyDay,
+            monthlyTime[0],
+            monthlyTime[1]
         );
 
         plugin.getLogger().info("Configuration loaded successfully.");
@@ -179,5 +202,46 @@ public final class ConfigManager {
     public void reload() {
         plugin.reloadConfig();
         load();
+    }
+
+    
+    private static int parseDayOfWeek(String value, List<String> errors) {
+        if (value != null) {
+            String v = value.trim().toUpperCase(Locale.ROOT);
+            try {
+                int n = Integer.parseInt(v);
+                if (n >= 1 && n <= 7) {
+                    return n;
+                }
+            } catch (NumberFormatException ignored) {
+                
+            }
+            try {
+                return DayOfWeek.valueOf(v).getValue();
+            } catch (IllegalArgumentException ignored) {
+                
+            }
+        }
+        errors.add("schedule.weekly.day must be a weekday name (MONDAY..SUNDAY) or 1-7, got: " + value);
+        return DayOfWeek.MONDAY.getValue();
+    }
+
+    
+    private static int[] parseTime(String value, String key, List<String> errors) {
+        String v = value == null ? "" : value.trim();
+        String[] parts = v.split(":");
+        if (parts.length == 2) {
+            try {
+                int hour = Integer.parseInt(parts[0].trim());
+                int minute = Integer.parseInt(parts[1].trim());
+                if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+                    return new int[]{hour, minute};
+                }
+            } catch (NumberFormatException ignored) {
+                
+            }
+        }
+        errors.add(key + " must be in 24-hour HH:mm format, got: " + value);
+        return new int[]{20, 0};
     }
 }

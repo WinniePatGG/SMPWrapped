@@ -2,10 +2,7 @@ package de.winniepat.smpwrapped.model;
 
 import java.util.*;
 
-/**
- * A generated Wrapped snapshot for a player in a season.
- * Immutable once created.
- */
+
 public record WrappedSnapshot(
     UUID playerId,
     String seasonId,
