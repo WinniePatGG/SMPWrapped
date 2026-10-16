@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronLeft, ChevronRight, Pause, Play, X, ArrowRight, Sparkles, Pickaxe } from 'lucide-react'
-import { api, WrappedSnapshot } from '../api/client'
+import { api, pickSeason, WrappedSnapshot } from '../api/client'
 import AnimatedCounter from '../components/AnimatedCounter'
 import PlayerAvatar from '../components/PlayerAvatar'
 import WrappedDashboard from '../components/WrappedDashboard'
@@ -52,7 +52,7 @@ export default function WrappedPage() {
       setError(null)
       try {
         const seasons = await api.getSeasons()
-        const season = seasons.seasons.find(s => s.active) || seasons.seasons[0]
+        const season = pickSeason(seasons.seasons)
         if (!season) throw new Error('No season is available yet')
 
         const player = await api.getPlayerByName(playerName!)

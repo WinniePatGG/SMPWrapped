@@ -3,14 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Search, ArrowRight } from 'lucide-react'
 import { useApi } from '../hooks/useApi'
-import { api, Season } from '../api/client'
+import { api, pickSeason, Season } from '../api/client'
 
 export default function LandingPage() {
   const [query, setQuery] = useState('')
   const navigate = useNavigate()
 
   const { data: seasonData } = useApi<{ seasons: Season[] }>(() => api.getSeasons())
-  const currentSeason = seasonData?.seasons?.find(s => s.active) || seasonData?.seasons?.[0]
+  const currentSeason = pickSeason(seasonData?.seasons)
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()

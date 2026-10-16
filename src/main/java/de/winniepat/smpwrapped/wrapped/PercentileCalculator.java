@@ -1,5 +1,7 @@
 package de.winniepat.smpwrapped.wrapped;
 
+import de.winniepat.smpwrapped.log.LogContext;
+import de.winniepat.smpwrapped.log.SMPLogger;
 import de.winniepat.smpwrapped.model.PlayerStats;
 
 import java.util.*;
@@ -7,11 +9,22 @@ import java.util.*;
 
 public final class PercentileCalculator {
 
+    private static final SMPLogger LOG = SMPLogger.get("percentiles");
+
+    private static final int MIN_COMPARABLE_PLAYERS = 3;
+
     private PercentileCalculator() {}
 
     
     public static Map<String, Double> calculatePercentiles(PlayerStats playerStats, Map<UUID, PlayerStats> allStats) {
         Map<String, Double> percentiles = new LinkedHashMap<>();
+
+        if (playerStats == null || allStats == null || allStats.isEmpty()) {
+            LOG.trace("Not enough data to calculate percentiles",
+                LogContext.of("hasPlayerStats", playerStats != null,
+                    "comparisonPlayers", allStats == null ? 0 : allStats.size()));
+            return percentiles;
+        }
 
         
         String[] statKeys = {
@@ -26,12 +39,19 @@ public final class PercentileCalculator {
             
             List<Double> allValues = new ArrayList<>();
             for (PlayerStats stats : allStats.values()) {
+                if (stats == null) {
+                    continue;
+                }
                 double v = getStatValue(stats, key);
                 if (v > 0) allValues.add(v);
             }
 
             
-            if (allValues.size() < 3) continue;
+            if (allValues.size() < MIN_COMPARABLE_PLAYERS) {
+                LOG.trace("Skipping percentile for a stat, too few comparable players",
+                    LogContext.of("stat", key, "comparablePlayers", allValues.size()));
+                continue;
+            }
 
             
             long beaten = allValues.stream().filter(v -> v < playerValue).count();
@@ -39,6 +59,8 @@ public final class PercentileCalculator {
             percentiles.put(key, Math.round(percentile * 10.0) / 10.0);
         }
 
+        LOG.trace("Calculated percentiles", LogContext.of(
+            "computed", percentiles.size(), "comparisonPlayers", allStats.size()));
         return percentiles;
     }
 

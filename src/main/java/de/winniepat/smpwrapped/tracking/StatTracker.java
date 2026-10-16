@@ -3,6 +3,8 @@ package de.winniepat.smpwrapped.tracking;
 import de.winniepat.smpwrapped.SMPWrapped;
 import de.winniepat.smpwrapped.model.*;
 import de.winniepat.smpwrapped.config.PluginConfig;
+import de.winniepat.smpwrapped.log.LogContext;
+import de.winniepat.smpwrapped.log.SMPLogger;
 import org.bukkit.*;
 import org.bukkit.entity.*;
 import org.bukkit.event.*;
@@ -19,17 +21,61 @@ import java.util.*;
 
 public class StatTracker implements Listener {
 
+    private static final SMPLogger LOG = SMPLogger.get("tracking");
+
     private final SMPWrapped plugin;
     private final PlayerDataBuffer buffer;
-    
+
+    private volatile String seasonId;
     private final Map<UUID, Long> lastSampleTimes = new HashMap<>();
     private final Map<UUID, String> playerDimensions = new HashMap<>();
 
     public StatTracker(SMPWrapped plugin) {
         this.plugin = plugin;
-        String seasonId = plugin.getConfigManager().get().currentSeasonId();
-        
-        this.buffer = new PlayerDataBuffer(seasonId, id -> plugin.getDatabase().loadPlayerStats(id, seasonId));
+        this.seasonId = plugin.getConfigManager().get().currentSeasonId();
+
+        this.buffer = new PlayerDataBuffer(seasonId,
+            id -> plugin.getDatabase().loadPlayerStats(id, this.seasonId));
+        LOG.info("Stat tracker started", LogContext.of("season", seasonId));
+    }
+
+    public String getSeasonId() {
+        return seasonId;
+    }
+
+    public synchronized void switchSeason(String newSeasonId) {
+        if (newSeasonId == null || newSeasonId.isBlank()) {
+            LOG.warn("Refusing to switch the stat tracker to a blank season");
+            return;
+        }
+        if (newSeasonId.equals(this.seasonId)) {
+            LOG.debug("Stat tracker already tracks this season",
+                LogContext.of("season", newSeasonId));
+            return;
+        }
+
+        String previous = this.seasonId;
+        try {
+            flushAll();
+        } catch (Throwable t) {
+            LOG.error("Could not flush stats before switching seasons, some progress may be lost", t,
+                LogContext.of("from", previous, "to", newSeasonId));
+        }
+
+        buffer.clear();
+        try {
+            buffer.setSeasonId(newSeasonId);
+        } catch (RuntimeException e) {
+            LOG.error("Could not repoint the stat buffer at the new season", e, LogContext.of(
+                "from", previous, "to", newSeasonId));
+            return;
+        }
+        this.seasonId = newSeasonId;
+        lastSampleTimes.clear();
+        playerDimensions.clear();
+
+        LOG.info("Stat tracker now tracks a new season", LogContext.of(
+            "previousSeason", previous, "season", newSeasonId));
     }
 
     public PlayerDataBuffer getBuffer() {
@@ -40,55 +86,72 @@ public class StatTracker implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerJoin(PlayerJoinEvent event) {
-        if (!plugin.getConfigManager().get().trackPlaytime()) return;
-        Player player = event.getPlayer();
-        if (!player.hasPlayedBefore()) {
+        guard("onPlayerJoin", () -> {
+            Player player = event.getPlayer();
+            if (!plugin.getConfigManager().get().trackPlaytime()) return;
+            if (!player.hasPlayedBefore()) {
+                
+                plugin.getDatabase().upsertPlayer(new TrackedPlayer(
+                    player.getUniqueId(),
+                    player.getName(),
+                    System.currentTimeMillis(),
+                    System.currentTimeMillis(),
+                    false
+                ));
+            }
+            String dimension = player.getWorld().getEnvironment().name();
+            playerDimensions.put(player.getUniqueId(), dimension);
+
+            PlayerStats stats = buffer.getBuffer(player.getUniqueId());
+            stats.addLoginSession();
+
             
-            plugin.getDatabase().upsertPlayer(new TrackedPlayer(
-                player.getUniqueId(),
-                player.getName(),
-                System.currentTimeMillis(),
-                System.currentTimeMillis(),
-                false
-            ));
-        }
-        playerDimensions.put(player.getUniqueId(), player.getWorld().getEnvironment().name());
+            
+            String today = LocalDate.now().toString();
+            if (!stats.getDailyPlaytime().containsKey(today)) {
+                stats.addUniqueDay();
+            }
+            stats.addDailyPlaytime(today, 0L);
+            lastSampleTimes.put(player.getUniqueId(), System.currentTimeMillis());
 
-        PlayerStats stats = buffer.getBuffer(player.getUniqueId());
-        stats.addLoginSession();
-
-        
-        
-        String today = LocalDate.now().toString();
-        if (!stats.getDailyPlaytime().containsKey(today)) {
-            stats.addUniqueDay();
-        }
-        stats.addDailyPlaytime(today, 0L);
-        lastSampleTimes.put(player.getUniqueId(), System.currentTimeMillis());
+            LOG.debug("Player joined", LogContext.of(
+                "player", player.getName(),
+                "uuid", player.getUniqueId(),
+                "dimension", dimension));
+        });
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerQuit(PlayerQuitEvent event) {
-        if (!plugin.getConfigManager().get().trackPlaytime()) return;
-        Player player = event.getPlayer();
+        guard("onPlayerQuit", () -> {
+            Player player = event.getPlayer();
 
-        
-        samplePlayer(player, System.currentTimeMillis());
-        lastSampleTimes.remove(player.getUniqueId());
-        playerDimensions.remove(player.getUniqueId());
+            
+            samplePlayer(player, System.currentTimeMillis());
+            lastSampleTimes.remove(player.getUniqueId());
+            playerDimensions.remove(player.getUniqueId());
 
-        
-        flushPlayer(player.getUniqueId());
+            
+            flushPlayer(player.getUniqueId());
+            LOG.debug("Player left", LogContext.of(
+                "player", player.getName(), "uuid", player.getUniqueId()));
+        });
     }
 
     
     private void samplePlayer(Player player, long now) {
         UUID uuid = player.getUniqueId();
         Long last = lastSampleTimes.put(uuid, now);
-        if (last == null) return;
+        if (last == null) {
+            LOG.trace("No previous sample point for this player, skipping",
+                LogContext.of("player", uuid));
+            return;
+        }
 
         long seconds = (now - last) / 1000;
-        if (seconds <= 0) return;
+        if (seconds <= 0) {
+            return;
+        }
 
         PlayerStats stats = buffer.getBuffer(uuid);
         stats.addPlaytime(seconds);
@@ -98,6 +161,9 @@ public class StatTracker implements Listener {
         String dimension = playerDimensions.computeIfAbsent(
             uuid, id -> player.getWorld().getEnvironment().name());
         stats.addDimensionTime(dimension, seconds);
+
+        LOG.trace("Sampled playtime", LogContext.of(
+            "player", uuid, "seconds", seconds, "dimension", dimension));
     }
 
     
@@ -105,7 +171,12 @@ public class StatTracker implements Listener {
         if (!plugin.getConfigManager().get().trackPlaytime()) return;
         long now = System.currentTimeMillis();
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            samplePlayer(player, now);
+            try {
+                samplePlayer(player, now);
+            } catch (Throwable t) {
+                LOG.error("Could not sample playtime for a player", t, LogContext.of(
+                    "player", player.getName(), "uuid", player.getUniqueId()));
+            }
         }
     }
 
@@ -220,33 +291,71 @@ public class StatTracker implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onWorldChange(PlayerChangedWorldEvent event) {
-        if (!plugin.getConfigManager().get().trackDimensions()) return;
-        Player player = event.getPlayer();
+        guard("onWorldChange", () -> {
+            Player player = event.getPlayer();
 
-        
-        samplePlayer(player, System.currentTimeMillis());
-        playerDimensions.put(player.getUniqueId(), player.getWorld().getEnvironment().name());
+            
+            samplePlayer(player, System.currentTimeMillis());
+            String dimension = player.getWorld().getEnvironment().name();
+            playerDimensions.put(player.getUniqueId(), dimension);
+            LOG.trace("Player changed dimension",
+                LogContext.of("player", player.getName(), "dimension", dimension));
+        });
     }
 
     
 
     public void flushAll() {
-        for (Map.Entry<UUID, PlayerStats> entry : buffer.getAllBuffers().entrySet()) {
-            plugin.getDatabase().savePlayerStats(entry.getValue());
+        Map<UUID, PlayerStats> all = buffer.getAllBuffers();
+        int saved = 0;
+        int failed = 0;
+        for (Map.Entry<UUID, PlayerStats> entry : all.entrySet()) {
+            try {
+                plugin.getDatabase().savePlayerStats(entry.getValue());
+                saved++;
+            } catch (Throwable t) {
+                failed++;
+                LOG.error("Could not flush a player stat buffer", t, LogContext.of(
+                    "player", entry.getKey(),
+                    "season", entry.getValue().getSeasonId()));
+            }
         }
-        plugin.getLogger().info("Flushed " + buffer.getAllBuffers().size() + " player stat buffers to database.");
+        if (failed > 0) {
+            LOG.error("Flushing player stats finished with failures", null, LogContext.of(
+                "requested", all.size(), "saved", saved, "failed", failed));
+        } else {
+            LOG.info("Flushed player stat buffers to the database",
+                LogContext.of("buffers", all.size()));
+        }
     }
 
     public void flushPlayer(UUID playerId) {
-        PlayerStats stats = buffer.getBuffer(playerId);
-        plugin.getDatabase().savePlayerStats(stats);
+        try {
+            PlayerStats stats = buffer.getBuffer(playerId);
+            plugin.getDatabase().savePlayerStats(stats);
+        } catch (Throwable t) {
+            LOG.error("Could not flush a player stat buffer", t, LogContext.of("player", playerId));
+        }
     }
 
     public void shutdown() {
-        
-        sampleOnlinePlayers();
-        flushAll();
-        lastSampleTimes.clear();
-        playerDimensions.clear();
+        try {
+            sampleOnlinePlayers();
+            flushAll();
+        } catch (Throwable t) {
+            LOG.error("Stat tracker shutdown failed", t);
+        } finally {
+            lastSampleTimes.clear();
+            playerDimensions.clear();
+            LOG.info("Stat tracker stopped");
+        }
+    }
+
+    private void guard(String operation, Runnable action) {
+        try {
+            action.run();
+        } catch (Throwable t) {
+            LOG.error("Tracking operation failed", t, LogContext.of("operation", operation));
+        }
     }
 }

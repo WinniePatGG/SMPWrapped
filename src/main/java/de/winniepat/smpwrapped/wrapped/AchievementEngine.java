@@ -1,5 +1,7 @@
 package de.winniepat.smpwrapped.wrapped;
 
+import de.winniepat.smpwrapped.log.LogContext;
+import de.winniepat.smpwrapped.log.SMPLogger;
 import de.winniepat.smpwrapped.model.Achievement;
 import de.winniepat.smpwrapped.model.Achievement.Category;
 import de.winniepat.smpwrapped.model.Achievement.Tier;
@@ -12,10 +14,17 @@ import java.util.*;
 
 public final class AchievementEngine {
 
+    private static final SMPLogger LOG = SMPLogger.get("achievements");
+
     private AchievementEngine() {}
 
     public static List<Achievement> evaluate(PlayerStats stats, Map<String, Double> percentiles) {
         List<Achievement> out = new ArrayList<>();
+
+        if (stats == null) {
+            LOG.error("Cannot evaluate achievements without stats");
+            return out;
+        }
 
         long playtime = stats.getPlaytimeSeconds();
         double hours = playtime / 3600.0;
@@ -266,6 +275,14 @@ public final class AchievementEngine {
             .comparingInt((Achievement a) -> a.tier().ordinal()).reversed()
             .thenComparing(Achievement::name));
 
+        LOG.trace("Evaluated achievements", LogContext.of(
+            "unlocked", out.size(),
+            "hours", Math.round(hours * 10.0) / 10.0,
+            "deaths", deaths,
+            "uniqueDays", uniqueDays,
+            "longestStreak", streak,
+            "nightShare", Math.round(nightShare * 100.0) / 100.0));
+
         return out;
     }
 
@@ -307,7 +324,9 @@ public final class AchievementEngine {
     private static LocalDate parseDate(String value) {
         try {
             return LocalDate.parse(value);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
+            LOG.trace("Skipping daily playtime entry with an unparsable date",
+                LogContext.of("value", value));
             return null;
         }
     }

@@ -3,6 +3,8 @@ package de.winniepat.smpwrapped.db;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import de.winniepat.smpwrapped.SMPWrapped;
+import de.winniepat.smpwrapped.log.LogContext;
+import de.winniepat.smpwrapped.log.SMPLogger;
 import de.winniepat.smpwrapped.model.*;
 
 import java.io.File;
@@ -11,6 +13,8 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class DatabaseManager {
+
+    private static final SMPLogger LOG = SMPLogger.get("database");
 
     private final SMPWrapped plugin;
     private HikariDataSource dataSource;
@@ -23,7 +27,15 @@ public class DatabaseManager {
     public void initialize() {
         String dbPath = plugin.getConfigManager().get().databasePath();
         File dbFile = new File(plugin.getDataFolder(), dbPath);
-        dbFile.getParentFile().mkdirs();
+
+        File parent = dbFile.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.exists()) {
+            throw new IllegalStateException("Could not create database directory: " + parent.getAbsolutePath());
+        }
+
+        LOG.info("Connecting to SQLite database", LogContext.of(
+            "path", dbFile.getAbsolutePath(),
+            "parent", parent == null ? "<none>" : parent.getAbsolutePath()));
 
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl("jdbc:sqlite:" + dbFile.getAbsolutePath());
@@ -39,7 +51,13 @@ public class DatabaseManager {
         config.addDataSourceProperty("journal_mode", "WAL");
         config.addDataSourceProperty("busy_timeout", "30000");
 
-        dataSource = new HikariDataSource(config);
+        try {
+            dataSource = new HikariDataSource(config);
+        } catch (Throwable t) {
+            LOG.fatal("Could not open the database connection pool", t, LogContext.of(
+                "path", dbFile.getAbsolutePath()));
+            throw new IllegalStateException("Database initialization failed", t);
+        }
 
         asyncExecutor = Executors.newFixedThreadPool(2, r -> {
             Thread t = new Thread(r, "SMPWrapped-DB");
@@ -55,7 +73,11 @@ public class DatabaseManager {
     }
 
     public Connection getConnection() throws SQLException {
-        return dataSource.getConnection();
+        HikariDataSource current = dataSource;
+        if (current == null) {
+            throw new SQLException("Connection pool is not initialised");
+        }
+        return current.getConnection();
     }
 
     
@@ -66,7 +88,11 @@ public class DatabaseManager {
             } catch (Exception e) {
                 throw new CompletionException(e);
             }
-        }, asyncExecutor);
+        }, asyncExecutor).whenComplete((result, throwable) -> {
+            if (throwable != null) {
+                LOG.error("Unhandled failure in an async database task", unwrap(throwable));
+            }
+        });
     }
 
     
@@ -77,7 +103,18 @@ public class DatabaseManager {
             } catch (Exception e) {
                 throw new CompletionException(e);
             }
-        }, asyncExecutor);
+        }, asyncExecutor).whenComplete((result, throwable) -> {
+            if (throwable != null) {
+                LOG.error("Unhandled failure in an async database task", unwrap(throwable));
+            }
+        });
+    }
+
+    static Throwable unwrap(Throwable throwable) {
+        if (throwable instanceof CompletionException && throwable.getCause() != null) {
+            return throwable.getCause();
+        }
+        return throwable;
     }
 
     private void runMigrations() {
@@ -158,11 +195,21 @@ public class DatabaseManager {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_sessions_player ON sessions(player_uuid)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_achievements_player ON achievements(player_uuid, season_id)");
 
-            plugin.getLogger().info("Database initialized and migrations applied.");
+            try {
+                stmt.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_seasons_single_active ON seasons(state) WHERE state = 'ACTIVE'");
+            } catch (SQLException e) {
+                LOG.error("Could not enforce a single active season, existing data violates the rule", e,
+                    LogContext.of("hint", "End or unpublish every extra ACTIVE season, then restart the server"));
+            }
+
+            LOG.info("Database initialized and migrations applied", LogContext.of("tables", 6, "indexes", 5));
 
         } catch (SQLException e) {
-            plugin.getLogger().severe("Failed to initialize database: " + e.getMessage());
+            LOG.fatal("Failed to apply database migrations", e);
             throw new RuntimeException("Database initialization failed", e);
+        } catch (Throwable t) {
+            LOG.fatal("Unexpected failure while applying database migrations", t);
+            throw new RuntimeException("Database initialization failed", t);
         }
     }
 
@@ -182,12 +229,19 @@ public class DatabaseManager {
                 ps.setInt(5, player.optedOut() ? 1 : 0);
                 ps.executeUpdate();
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to upsert player: " + e.getMessage());
+                LOG.error("Failed to upsert player", e, LogContext.of(
+                    "operation", "upsertPlayer",
+                    "player", player.uuid(),
+                    "name", player.lastName()));
             }
         });
     }
 
     public Optional<TrackedPlayer> getPlayer(UUID uuid) {
+        if (uuid == null) {
+            LOG.warn("Refusing to look up a player without a UUID");
+            return Optional.empty();
+        }
         try (Connection conn = getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "SELECT uuid, last_name, first_seen, last_seen, opted_out FROM players WHERE uuid = ?")) {
@@ -204,7 +258,10 @@ public class DatabaseManager {
                 }
             }
         } catch (SQLException e) {
-            plugin.getLogger().warning("Failed to get player: " + e.getMessage());
+            LOG.error("Failed to load player", e, LogContext.of("operation", "getPlayer", "player", uuid));
+        } catch (IllegalArgumentException e) {
+            LOG.error("Stored player row contains an invalid UUID", e, LogContext.of(
+                "operation", "getPlayer", "player", uuid));
         }
         return Optional.empty();
     }
@@ -215,21 +272,31 @@ public class DatabaseManager {
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT * FROM players")) {
             while (rs.next()) {
-                players.add(new TrackedPlayer(
-                    UUID.fromString(rs.getString("uuid")),
-                    rs.getString("last_name"),
-                    rs.getLong("first_seen"),
-                    rs.getLong("last_seen"),
-                    rs.getInt("opted_out") == 1
-                ));
+                String rawUuid = rs.getString("uuid");
+                try {
+                    players.add(new TrackedPlayer(
+                        UUID.fromString(rawUuid),
+                        rs.getString("last_name"),
+                        rs.getLong("first_seen"),
+                        rs.getLong("last_seen"),
+                        rs.getInt("opted_out") == 1
+                    ));
+                } catch (IllegalArgumentException e) {
+                    LOG.error("Skipping player row with an invalid UUID", e, LogContext.of(
+                        "operation", "getAllPlayers", "row", rawUuid));
+                }
             }
         } catch (SQLException e) {
-            plugin.getLogger().warning("Failed to get all players: " + e.getMessage());
+            LOG.error("Failed to load all players", e, LogContext.of("operation", "getAllPlayers"));
         }
         return players;
     }
 
     public void setPlayerOptOut(UUID uuid, boolean optedOut) {
+        if (uuid == null) {
+            LOG.warn("Refusing to change the opt-out flag of a player without a UUID");
+            return;
+        }
         runAsync(() -> {
             try (Connection conn = getConnection();
                  PreparedStatement ps = conn.prepareStatement(
@@ -238,50 +305,69 @@ public class DatabaseManager {
                 ps.setString(2, uuid.toString());
                 ps.executeUpdate();
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to set opt-out: " + e.getMessage());
+                LOG.error("Failed to update the player opt-out flag", e, LogContext.of(
+                    "operation", "setPlayerOptOut", "player", uuid, "optedOut", optedOut));
             }
         });
     }
 
     
 
-    public void createSeason(Season season) {
-        runAsync(() -> {
-            try (Connection conn = getConnection();
-                 PreparedStatement ps = conn.prepareStatement(
-                     "INSERT OR REPLACE INTO seasons (id, name, start_time, end_time, state) VALUES (?, ?, ?, ?, ?)")) {
-                ps.setString(1, season.id());
-                ps.setString(2, season.name());
-                ps.setLong(3, season.startTime());
-                ps.setLong(4, season.endTime());
-                ps.setString(5, season.state().name());
-                ps.executeUpdate();
-            } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to create season: " + e.getMessage());
-            }
-        });
+    public boolean createSeason(Season season) {
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT OR REPLACE INTO seasons (id, name, start_time, end_time, state) VALUES (?, ?, ?, ?, ?)")) {
+            ps.setString(1, season.id());
+            ps.setString(2, season.name());
+            ps.setLong(3, season.startTime());
+            ps.setLong(4, season.endTime());
+            ps.setString(5, season.state().name());
+            ps.executeUpdate();
+            return true;
+        } catch (SQLException e) {
+            LOG.error("Failed to store season", e, LogContext.of(
+                "operation", "createSeason", "season", season.id(), "name", season.name(),
+                "hint", "Another season may still be ACTIVE, end it and retry"));
+            return false;
+        }
     }
 
     public Optional<Season> getSeason(String seasonId) {
+        if (seasonId == null || seasonId.isBlank()) {
+            LOG.warn("Refusing to load a season without an id");
+            return Optional.empty();
+        }
         try (Connection conn = getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "SELECT * FROM seasons WHERE id = ?")) {
             ps.setString(1, seasonId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return Optional.of(new Season(
-                        rs.getString("id"),
-                        rs.getString("name"),
-                        rs.getLong("start_time"),
-                        rs.getLong("end_time"),
-                        Season.SeasonState.valueOf(rs.getString("state"))
-                    ));
+                    return Optional.of(readSeason(rs));
                 }
             }
         } catch (SQLException e) {
-            plugin.getLogger().warning("Failed to get season: " + e.getMessage());
+            LOG.error("Failed to load season", e, LogContext.of("operation", "getSeason", "season", seasonId));
+        } catch (IllegalArgumentException e) {
+            LOG.error("Stored season row contains an unknown state", e, LogContext.of(
+                "operation", "getSeason", "season", seasonId));
         }
         return Optional.empty();
+    }
+
+    private Season readSeason(ResultSet rs) throws SQLException {
+        String id = rs.getString("id");
+        String name = rs.getString("name");
+        String state = rs.getString("state");
+        long start = rs.getLong("start_time");
+        long end = rs.getLong("end_time");
+        try {
+            return new Season(id, name, start, end, Season.SeasonState.valueOf(state));
+        } catch (IllegalArgumentException | NullPointerException e) {
+            LOG.error("Season row has an invalid state, defaulting to ENDED", e, LogContext.of(
+                "season", id, "storedState", state));
+            return new Season(id, name, start, end, Season.SeasonState.ENDED);
+        }
     }
 
     public List<Season> getAllSeasons() {
@@ -290,46 +376,43 @@ public class DatabaseManager {
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT * FROM seasons ORDER BY start_time DESC")) {
             while (rs.next()) {
-                seasons.add(new Season(
-                    rs.getString("id"),
-                    rs.getString("name"),
-                    rs.getLong("start_time"),
-                    rs.getLong("end_time"),
-                    Season.SeasonState.valueOf(rs.getString("state"))
-                ));
+                seasons.add(readSeason(rs));
             }
         } catch (SQLException e) {
-            plugin.getLogger().warning("Failed to get all seasons: " + e.getMessage());
+            LOG.error("Failed to load all seasons", e, LogContext.of("operation", "getAllSeasons"));
         }
         return seasons;
     }
 
     public void updateSeasonState(String seasonId, Season.SeasonState state) {
-        runAsync(() -> {
-            try (Connection conn = getConnection();
-                 PreparedStatement ps = conn.prepareStatement(
-                     "UPDATE seasons SET state = ? WHERE id = ?")) {
-                ps.setString(1, state.name());
-                ps.setString(2, seasonId);
-                ps.executeUpdate();
-            } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to update season state: " + e.getMessage());
-            }
-        });
+        if (seasonId == null || state == null) {
+            LOG.warn("Refusing to update a season without an id or state",
+                LogContext.of("season", seasonId, "state", state));
+            return;
+        }
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE seasons SET state = ? WHERE id = ?")) {
+            ps.setString(1, state.name());
+            ps.setString(2, seasonId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            LOG.error("Failed to update season state", e, LogContext.of(
+                "operation", "updateSeasonState", "season", seasonId, "state", state));
+        }
     }
 
     public void setSeasonEndTime(String seasonId, long endTime) {
-        runAsync(() -> {
-            try (Connection conn = getConnection();
-                 PreparedStatement ps = conn.prepareStatement(
-                     "UPDATE seasons SET end_time = ? WHERE id = ?")) {
-                ps.setLong(1, endTime);
-                ps.setString(2, seasonId);
-                ps.executeUpdate();
-            } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to set season end time: " + e.getMessage());
-            }
-        });
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE seasons SET end_time = ? WHERE id = ?")) {
+            ps.setLong(1, endTime);
+            ps.setString(2, seasonId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            LOG.error("Failed to update season end time", e, LogContext.of(
+                "operation", "setSeasonEndTime", "season", seasonId, "endTime", endTime));
+        }
     }
 
     
@@ -363,11 +446,30 @@ public class DatabaseManager {
 
                     conn.commit();
                 } catch (SQLException e) {
-                    conn.rollback();
+                    try {
+                        conn.rollback();
+                        LOG.warn("Rolled back player stats transaction", LogContext.of(
+                            "operation", "savePlayerStats",
+                            "player", stats.getPlayerId(),
+                            "season", stats.getSeasonId()));
+                    } catch (SQLException rollbackError) {
+                        LOG.error("Rollback of the player stats transaction failed", rollbackError, LogContext.of(
+                            "operation", "savePlayerStats",
+                            "player", stats.getPlayerId(),
+                            "season", stats.getSeasonId()));
+                    }
                     throw e;
                 }
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to save player stats: " + e.getMessage());
+                LOG.error("Failed to save player stats", e, LogContext.of(
+                    "operation", "savePlayerStats",
+                    "player", stats.getPlayerId(),
+                    "season", stats.getSeasonId()));
+            } catch (Throwable t) {
+                LOG.error("Unexpected failure while saving player stats", t, LogContext.of(
+                    "operation", "savePlayerStats",
+                    "player", stats.getPlayerId(),
+                    "season", stats.getSeasonId()));
             }
         });
     }
@@ -418,6 +520,11 @@ public class DatabaseManager {
 
     public PlayerStats loadPlayerStats(UUID playerId, String seasonId) {
         PlayerStats stats = new PlayerStats(playerId, seasonId);
+        if (playerId == null || seasonId == null) {
+            LOG.warn("Refusing to load stats without a player id and season id",
+                LogContext.of("player", playerId, "season", seasonId));
+            return stats;
+        }
         try (Connection conn = getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "SELECT stat_key, stat_value, stat_type FROM player_season_stats WHERE player_uuid = ? AND season_id = ?")) {
@@ -434,14 +541,31 @@ public class DatabaseManager {
                             applyStat(stats, key, v);
                         } else if ("json".equals(type)) {
                             applyMapStat(stats, key, value);
+                        } else {
+                            LOG.warn("Ignoring stat row with an unknown type", LogContext.of(
+                                "operation", "loadPlayerStats",
+                                "player", playerId,
+                                "season", seasonId,
+                                "statKey", key,
+                                "statType", type));
                         }
                     } catch (Exception e) {
-                        plugin.getLogger().warning("Failed to parse stat " + key + ": " + e.getMessage());
+                        LOG.error("Failed to parse stored stat", e, LogContext.of(
+                            "operation", "loadPlayerStats",
+                            "player", playerId,
+                            "season", seasonId,
+                            "statKey", key,
+                            "statType", type,
+                            "value", value));
                     }
                 }
             }
         } catch (SQLException e) {
-            plugin.getLogger().warning("Failed to load player stats: " + e.getMessage());
+            LOG.error("Failed to load player stats", e, LogContext.of(
+                "operation", "loadPlayerStats", "player", playerId, "season", seasonId));
+        } catch (Throwable t) {
+            LOG.error("Unexpected failure while loading player stats", t, LogContext.of(
+                "operation", "loadPlayerStats", "player", playerId, "season", seasonId));
         }
         return stats;
     }
@@ -453,14 +577,31 @@ public class DatabaseManager {
             case "blocks_placed" -> stats.addBlocksPlaced(value);
             case "distance_traveled" -> stats.addDistance(value);
             case "mobs_killed" -> stats.addMobsKilled(value);
-            case "deaths" -> { for (long i = 0; i < value; i++) stats.addDeath(); }
+            case "deaths" -> repeat(key, value, stats::addDeath);
             case "damage_dealt" -> stats.addDamageDealt(value);
             case "damage_received" -> stats.addDamageReceived(value);
             case "items_crafted" -> stats.addItemsCrafted(value);
             case "items_collected" -> stats.addItemsCollected(value);
-            case "fishing_catches" -> { for (long i = 0; i < value; i++) stats.addFishingCatch(); }
-            case "login_sessions" -> { for (long i = 0; i < value; i++) stats.addLoginSession(); }
-            case "unique_days" -> { for (long i = 0; i < value; i++) stats.addUniqueDay(); }
+            case "fishing_catches" -> repeat(key, value, stats::addFishingCatch);
+            case "login_sessions" -> repeat(key, value, stats::addLoginSession);
+            case "unique_days" -> repeat(key, value, stats::addUniqueDay);
+            default -> LOG.trace("Ignoring unknown scalar stat key",
+                LogContext.of("statKey", key, "value", value));
+        }
+    }
+
+    private static final long MAX_REPEAT_ITERATIONS = 1_000_000L;
+
+    private void repeat(String statKey, long value, Runnable increment) {
+        long iterations = Math.max(0L, Math.min(value, MAX_REPEAT_ITERATIONS));
+        if (iterations != value) {
+            LOG.warn("Stored stat exceeds the safe replay limit and was clamped", LogContext.of(
+                "statKey", statKey,
+                "storedValue", value,
+                "appliedValue", iterations));
+        }
+        for (long i = 0; i < iterations; i++) {
+            increment.run();
         }
     }
 
@@ -475,10 +616,12 @@ public class DatabaseManager {
             case "hourly_playtime" -> map.forEach((hour, seconds) -> {
                 try {
                     stats.addHourlyPlaytime(Integer.parseInt(hour), seconds);
-                } catch (NumberFormatException ignored) {
-                    
+                } catch (NumberFormatException e) {
+                    LOG.warn("Ignoring hourly playtime entry with a non-numeric hour",
+                        LogContext.of("hour", hour, "seconds", seconds));
                 }
             });
+            default -> LOG.trace("Ignoring unknown map stat key", LogContext.of("statKey", key));
         }
     }
 
@@ -512,7 +655,9 @@ public class DatabaseManager {
                 String v = pair.substring(colonIdx + 1).trim();
                 try {
                     map.put(k, Long.parseLong(v));
-                } catch (NumberFormatException ignored) {}
+                } catch (NumberFormatException e) {
+                    LOG.trace("Skipping malformed map stat entry", LogContext.of("key", k, "value", v));
+                }
             }
         }
         return map;
@@ -530,14 +675,23 @@ public class DatabaseManager {
             ps.setInt(3, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    results.add(Map.entry(
-                        UUID.fromString(rs.getString("player_uuid")),
-                        Long.parseLong(rs.getString("stat_value"))
-                    ));
+                    String rawUuid = rs.getString("player_uuid");
+                    String rawValue = rs.getString("stat_value");
+                    try {
+                        results.add(Map.entry(UUID.fromString(rawUuid), Long.parseLong(rawValue)));
+                    } catch (IllegalArgumentException e) {
+                        LOG.error("Skipping leaderboard row with invalid data", e, LogContext.of(
+                            "operation", "getLeaderboard",
+                            "season", seasonId,
+                            "stat", statKey,
+                            "playerUuid", rawUuid,
+                            "value", rawValue));
+                    }
                 }
             }
         } catch (SQLException e) {
-            plugin.getLogger().warning("Failed to get leaderboard: " + e.getMessage());
+            LOG.error("Failed to load leaderboard", e, LogContext.of(
+                "operation", "getLeaderboard", "season", seasonId, "stat", statKey, "limit", limit));
         }
         return results;
     }
@@ -551,11 +705,23 @@ public class DatabaseManager {
             ps.setString(2, statKey);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    results.put(UUID.fromString(rs.getString("player_uuid")), Long.parseLong(rs.getString("stat_value")));
+                    String rawUuid = rs.getString("player_uuid");
+                    String rawValue = rs.getString("stat_value");
+                    try {
+                        results.put(UUID.fromString(rawUuid), Long.parseLong(rawValue));
+                    } catch (IllegalArgumentException e) {
+                        LOG.error("Skipping stats row with invalid data", e, LogContext.of(
+                            "operation", "getAllStatsForSeason",
+                            "season", seasonId,
+                            "stat", statKey,
+                            "playerUuid", rawUuid,
+                            "value", rawValue));
+                    }
                 }
             }
         } catch (SQLException e) {
-            plugin.getLogger().warning("Failed to get all stats: " + e.getMessage());
+            LOG.error("Failed to load stats", e, LogContext.of(
+                "operation", "getAllStatsForSeason", "season", seasonId, "stat", statKey));
         }
         return results;
     }
@@ -573,7 +739,8 @@ public class DatabaseManager {
                 ps.setString(4, session.dimension());
                 ps.executeUpdate();
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to start session: " + e.getMessage());
+                LOG.error("Failed to store session start", e, LogContext.of(
+                    "operation", "startSession", "player", session.playerId()));
             }
         });
     }
@@ -587,7 +754,8 @@ public class DatabaseManager {
                 ps.setString(2, playerId.toString());
                 ps.executeUpdate();
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to end session: " + e.getMessage());
+                LOG.error("Failed to store session end", e, LogContext.of(
+                    "operation", "endSession", "player", playerId, "logoutTime", logoutTime));
             }
         });
     }
@@ -595,6 +763,10 @@ public class DatabaseManager {
     
 
     public void saveWrappedSnapshot(WrappedSnapshot snapshot) {
+        if (snapshot == null) {
+            LOG.warn("Refusing to save a null Wrapped snapshot");
+            return;
+        }
         runAsync(() -> {
             try (Connection conn = getConnection();
                  PreparedStatement ps = conn.prepareStatement(
@@ -605,12 +777,20 @@ public class DatabaseManager {
                 ps.setString(4, snapshotToJson(snapshot));
                 ps.executeUpdate();
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to save wrapped snapshot: " + e.getMessage());
+                LOG.error("Failed to save Wrapped snapshot", e, LogContext.of(
+                    "operation", "saveWrappedSnapshot",
+                    "player", snapshot.playerId(),
+                    "season", snapshot.seasonId()));
             }
         });
     }
 
     public Optional<WrappedSnapshot> getWrappedSnapshot(UUID playerId, String seasonId) {
+        if (playerId == null || seasonId == null) {
+            LOG.warn("Refusing to load a Wrapped snapshot without a player id and season id",
+                LogContext.of("player", playerId, "season", seasonId));
+            return Optional.empty();
+        }
         try (Connection conn = getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "SELECT snapshot_json FROM wrapped_snapshots WHERE player_uuid = ? AND season_id = ?")) {
@@ -618,11 +798,15 @@ public class DatabaseManager {
             ps.setString(2, seasonId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return Optional.of(jsonToSnapshot(rs.getString("snapshot_json")));
+                    return Optional.of(jsonToSnapshot(rs.getString("snapshot_json"), playerId, seasonId));
                 }
             }
         } catch (SQLException e) {
-            plugin.getLogger().warning("Failed to get wrapped snapshot: " + e.getMessage());
+            LOG.error("Failed to load Wrapped snapshot", e, LogContext.of(
+                "operation", "getWrappedSnapshot", "player", playerId, "season", seasonId));
+        } catch (RuntimeException e) {
+            LOG.error("Stored Wrapped snapshot is corrupted", e, LogContext.of(
+                "operation", "getWrappedSnapshot", "player", playerId, "season", seasonId));
         }
         return Optional.empty();
     }
@@ -675,15 +859,21 @@ public class DatabaseManager {
         return sb.toString();
     }
 
-    private WrappedSnapshot jsonToSnapshot(String json) {
+    private WrappedSnapshot jsonToSnapshot(String json, UUID fallbackPlayerId, String fallbackSeasonId) {
         
-        Map<String, Object> map = parseJsonObject(json);
-        UUID playerId = UUID.fromString((String) map.get("playerId"));
-        String seasonId = (String) map.get("seasonId");
-        String playerName = (String) map.get("playerName");
-        long generatedAt = ((Number) map.get("generatedAt")).longValue();
-        String archetype = (String) map.get("archetype");
-        String archetypeDescription = (String) map.get("archetypeDescription");
+        Map<String, Object> map;
+        try {
+            map = parseJsonObject(json);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Snapshot JSON is not parsable", e);
+        }
+
+        UUID playerId = readUuid(map.get("playerId"), fallbackPlayerId, "playerId");
+        String seasonId = readString(map.get("seasonId"), fallbackSeasonId, "seasonId");
+        String playerName = readString(map.get("playerName"), "unknown", "playerName");
+        long generatedAt = readLong(map.get("generatedAt"), 0L, "generatedAt");
+        String archetype = readString(map.get("archetype"), "unknown", "archetype");
+        String archetypeDescription = readString(map.get("archetypeDescription"), "", "archetypeDescription");
 
         @SuppressWarnings("unchecked")
         Map<String, Object> stats = (Map<String, Object>) map.getOrDefault("stats", Map.of());
@@ -696,6 +886,26 @@ public class DatabaseManager {
 
         return new WrappedSnapshot(playerId, seasonId, playerName, generatedAt, archetype,
             archetypeDescription, stats, achievements, percentiles, milestones);
+    }
+
+    private UUID readUuid(Object raw, UUID fallback, String field) {
+        if (raw instanceof String text && !text.isBlank()) {
+            try {
+                return UUID.fromString(text);
+            } catch (IllegalArgumentException e) {
+                LOG.warn("Snapshot field is not a valid UUID, using fallback", LogContext.of(
+                    "field", field, "value", text, "fallback", fallback));
+            }
+        }
+        return fallback;
+    }
+
+    private String readString(Object raw, String fallback, String field) {
+        return (raw instanceof String text) ? text : fallback;
+    }
+
+    private long readLong(Object raw, long fallback, String field) {
+        return (raw instanceof Number number) ? number.longValue() : fallback;
     }
 
     private Map<String, Object> parseJsonObject(String json) {
@@ -792,7 +1002,11 @@ public class DatabaseManager {
                 ps.setLong(4, System.currentTimeMillis());
                 ps.executeUpdate();
             } catch (SQLException e) {
-                plugin.getLogger().warning("Failed to save achievement: " + e.getMessage());
+                LOG.error("Failed to save achievement", e, LogContext.of(
+                    "operation", "saveAchievement",
+                    "player", playerId,
+                    "season", seasonId,
+                    "achievement", achievementKey));
             }
         });
     }
@@ -810,7 +1024,8 @@ public class DatabaseManager {
                 }
             }
         } catch (SQLException e) {
-            plugin.getLogger().warning("Failed to get achievements: " + e.getMessage());
+            LOG.error("Failed to load achievements", e, LogContext.of(
+                "operation", "getAchievements", "player", playerId, "season", seasonId));
         }
         return achievements;
     }
@@ -833,10 +1048,14 @@ public class DatabaseManager {
                             stats.put(key, rs.getLong("total"));
                         }
                     }
+                } catch (SQLException e) {
+                    LOG.error("Failed to aggregate a server-wide stat", e, LogContext.of(
+                        "operation", "getServerWideStats", "season", seasonId, "stat", key));
                 }
             }
         } catch (SQLException e) {
-            plugin.getLogger().warning("Failed to get server-wide stats: " + e.getMessage());
+            LOG.error("Failed to load server-wide stats", e, LogContext.of(
+                "operation", "getServerWideStats", "season", seasonId));
         }
         return stats;
     }
@@ -846,7 +1065,11 @@ public class DatabaseManager {
     public File createBackup() {
         try {
             File backupDir = new File(plugin.getDataFolder(), "backups");
-            backupDir.mkdirs();
+            if (!backupDir.exists() && !backupDir.mkdirs() && !backupDir.exists()) {
+                LOG.error("Could not create the backup directory", null, LogContext.of(
+                    "directory", backupDir.getAbsolutePath()));
+                return null;
+            }
             String timestamp = new java.text.SimpleDateFormat("yyyy-MM-dd-HHmmss").format(new java.util.Date());
             File backupFile = new File(backupDir, "smpwrapped-backup-" + timestamp + ".db");
 
@@ -855,28 +1078,42 @@ public class DatabaseManager {
                 ps.setString(1, backupFile.getAbsolutePath());
                 ps.execute();
             }
-            plugin.getLogger().info("Database backup created: " + backupFile.getAbsolutePath());
+            LOG.info("Database backup created", LogContext.of(
+                "file", backupFile.getName(),
+                "path", backupFile.getAbsolutePath(),
+                "sizeBytes", backupFile.exists() ? backupFile.length() : -1L));
             return backupFile;
-        } catch (SQLException e) {
-            plugin.getLogger().severe("Failed to create backup: " + e.getMessage());
+        } catch (Throwable t) {
+            LOG.error("Failed to create database backup", t);
             return null;
         }
     }
 
     public void shutdown() {
+        LOG.info("Shutting down the database");
         if (asyncExecutor != null) {
             asyncExecutor.shutdown();
             try {
                 if (!asyncExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    LOG.warn("Database tasks did not finish in time, forcing shutdown",
+                        LogContext.of("pendingThreads", 2));
                     asyncExecutor.shutdownNow();
+                } else {
+                    LOG.debug("All database tasks completed");
                 }
             } catch (InterruptedException e) {
                 asyncExecutor.shutdownNow();
                 Thread.currentThread().interrupt();
+                LOG.warn("Interrupted while waiting for database tasks to finish", e);
             }
         }
         if (dataSource != null) {
-            dataSource.close();
+            try {
+                dataSource.close();
+                LOG.debug("Connection pool closed");
+            } catch (Throwable t) {
+                LOG.error("Failed to close the connection pool", t);
+            }
         }
     }
 }

@@ -3,6 +3,10 @@ package de.winniepat.smpwrapped;
 import de.winniepat.smpwrapped.command.WrappedCommand;
 import de.winniepat.smpwrapped.config.ConfigManager;
 import de.winniepat.smpwrapped.db.DatabaseManager;
+import de.winniepat.smpwrapped.log.LogContext;
+import de.winniepat.smpwrapped.log.LogSettings;
+import de.winniepat.smpwrapped.log.Logging;
+import de.winniepat.smpwrapped.log.SMPLogger;
 import de.winniepat.smpwrapped.season.SeasonManager;
 import de.winniepat.smpwrapped.tracking.StatTracker;
 import de.winniepat.smpwrapped.web.WebServerManager;
@@ -16,6 +20,8 @@ import java.util.concurrent.TimeUnit;
 
 public final class SMPWrapped extends JavaPlugin {
 
+    private static final SMPLogger LOG = SMPLogger.get("plugin");
+
     private ConfigManager configManager;
     private DatabaseManager database;
     private StatTracker statTracker;
@@ -27,60 +33,103 @@ public final class SMPWrapped extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        Logging.init(getDescription().getVersion(), getDataFolder(), LogSettings.defaults(), getLogger());
+
+        try {
+            Thread.setDefaultUncaughtExceptionHandler((thread, throwable) ->
+                LOG.fatal("Uncaught exception in thread", throwable, LogContext.of("thread", thread.getName())));
+        } catch (Throwable t) {
+            LOG.warn("Could not install the default uncaught exception handler", t);
+        }
+
+        LOG.info("Starting SMPWrapped", LogContext.of("version", getDescription().getVersion()));
+
         configManager = new ConfigManager(this);
-        configManager.load();
+        if (!guard("config", () -> configManager.load())) {
+            LOG.fatal("Configuration could not be loaded; disabling SMPWrapped");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
 
-        database = new DatabaseManager(this);
-        database.initialize();
+        Logging.init(getDescription().getVersion(), getDataFolder(), configManager.get().toLogSettings(), getLogger());
 
-        statTracker = new StatTracker(this);
-        getServer().getPluginManager().registerEvents(statTracker, this);
+        if (guard("database", () -> {
+            database = new DatabaseManager(this);
+            database.initialize();
+        })) {
+            guard("tracking", () -> {
+                statTracker = new StatTracker(this);
+                getServer().getPluginManager().registerEvents(statTracker, this);
+                getServer().getScheduler().runTaskTimer(this,
+                    () -> guard("sampleOnlinePlayers", statTracker::sampleOnlinePlayers),
+                    1200L, 1200L);
+            });
+        }
 
-        getServer().getScheduler().runTaskTimer(this, statTracker::sampleOnlinePlayers, 1200L, 1200L);
+        guard("seasons", () -> seasonManager = new SeasonManager(this));
+        guard("generator", () -> wrappedGenerator = new WrappedGenerator(this));
+        guard("scheduler", () -> {
+            wrappedScheduler = new WrappedScheduler(this);
+            wrappedScheduler.start();
+        });
+        guard("web", () -> {
+            webServerManager = new WebServerManager(this);
+            webServerManager.start();
+        });
 
-        seasonManager = new SeasonManager(this);
+        guard("command", () -> {
+            WrappedCommand command = new WrappedCommand(this);
+            if (getCommand("wrapped") == null) {
+                throw new IllegalStateException("Command 'wrapped' is missing from plugin.yml");
+            }
+            getCommand("wrapped").setExecutor(command);
+            getCommand("wrapped").setTabCompleter(command);
+        });
 
-        wrappedGenerator = new WrappedGenerator(this);
+        guard("autosave", this::startAutosave);
 
-        wrappedScheduler = new WrappedScheduler(this);
-        wrappedScheduler.start();
-
-        webServerManager = new WebServerManager(this);
-        webServerManager.start();
-
-        WrappedCommand command = new WrappedCommand(this);
-        getCommand("wrapped").setExecutor(command);
-        getCommand("wrapped").setTabCompleter(command);
-
-        startAutosave();
-
-        getLogger().info("SMPWrapped enabled successfully!");
-        getLogger().info("Web dashboard: " + configManager.get().publicBaseUrl());
+        LOG.info("SMPWrapped enabled successfully", LogContext.of(
+            "webDashboard", configManager.get().publicBaseUrl(),
+            "season", configManager.get().currentSeasonId(),
+            "logFile", Logging.logFilePath()));
     }
 
     @Override
     public void onDisable() {
-        if (wrappedScheduler != null) {
-            wrappedScheduler.stop();
-        }
+        LOG.info("Disabling SMPWrapped");
+
+        guard("shutdown-scheduler", () -> {
+            if (wrappedScheduler != null) {
+                wrappedScheduler.stop();
+            }
+        });
 
         if (autosaveExecutor != null) {
             autosaveExecutor.shutdown();
+            autosaveExecutor = null;
         }
 
-        if (statTracker != null) {
-            statTracker.shutdown();
-        }
+        guard("shutdown-tracking", () -> {
+            if (statTracker != null) {
+                statTracker.shutdown();
+            }
+        });
 
-        if (webServerManager != null) {
-            webServerManager.stop();
-        }
+        guard("shutdown-web", () -> {
+            if (webServerManager != null) {
+                webServerManager.stop();
+            }
+        });
 
-        if (database != null) {
-            database.shutdown();
-        }
+        guard("shutdown-database", () -> {
+            if (database != null) {
+                database.shutdown();
+            }
+        });
 
-        getLogger().info("SMPWrapped disabled.");
+        LOG.info("SMPWrapped disabled");
+
+        Logging.shutdown();
     }
 
     private void startAutosave() {
@@ -90,13 +139,20 @@ public final class SMPWrapped extends JavaPlugin {
             t.setDaemon(true);
             return t;
         });
-        autosaveExecutor.scheduleAtFixedRate(() -> {
-            try {
-                statTracker.flushAll();
-            } catch (Exception e) {
-                getLogger().warning("Autosave failed: " + e.getMessage());
-            }
-        }, interval, interval, TimeUnit.SECONDS);
+        autosaveExecutor.scheduleAtFixedRate(
+            () -> guard("autosave-flush", () -> statTracker.flushAll()),
+            interval, interval, TimeUnit.SECONDS);
+        LOG.info("Autosave scheduled", LogContext.of("intervalSeconds", interval));
+    }
+
+    private boolean guard(String operation, Runnable action) {
+        try {
+            action.run();
+            return true;
+        } catch (Throwable t) {
+            LOG.error("Startup/shutdown step failed", t, LogContext.of("step", operation));
+            return false;
+        }
     }
 
     public ConfigManager getConfigManager() { return configManager; }

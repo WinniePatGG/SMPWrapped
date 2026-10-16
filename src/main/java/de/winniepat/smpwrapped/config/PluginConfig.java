@@ -1,5 +1,8 @@
 package de.winniepat.smpwrapped.config;
 
+import de.winniepat.smpwrapped.log.LogLevel;
+import de.winniepat.smpwrapped.log.LogSettings;
+
 import java.util.*;
 
 
@@ -72,7 +75,23 @@ public record PluginConfig(
     boolean monthlyWrappedEnabled,
     int monthlyWrappedDay,        
     int monthlyWrappedHour,
-    int monthlyWrappedMinute
+    int monthlyWrappedMinute,
+
+    
+    String logLevel,
+    boolean logConsole,
+    boolean logFile,
+    long logMaxFileSizeMb,
+    int logKeepFiles,
+    int logQueueCapacity,
+    boolean logStackTraces,
+    int logStackTraceDepth,
+    boolean logDedupe,
+    int logDedupeThreshold,
+    long logDedupeWindowSeconds,
+    long logDedupeThrottleSeconds,
+    boolean logRedactSecrets,
+    boolean logSummaryOnShutdown
 ) {
     public PluginConfig {
         Objects.requireNonNull(webHost, "webHost");
@@ -88,5 +107,24 @@ public record PluginConfig(
         return trackPlaytime || trackBlocks || trackDistance || trackMobs ||
                trackDeaths || trackDamage || trackCrafting || trackFishing ||
                trackDimensions || trackSessions || trackAchievements;
+    }
+
+    public LogSettings toLogSettings() {
+        return LogSettings.builder()
+            .level(LogLevel.parse(logLevel, LogLevel.INFO))
+            .consoleEnabled(logConsole)
+            .fileEnabled(logFile)
+            .maxFileSizeMb(logMaxFileSizeMb)
+            .keepFiles(logKeepFiles)
+            .queueCapacity(logQueueCapacity)
+            .stackTraces(logStackTraces)
+            .stackTraceDepth(logStackTraceDepth)
+            .dedupeEnabled(logDedupe)
+            .dedupeThreshold(logDedupeThreshold)
+            .dedupeWindowSeconds(logDedupeWindowSeconds)
+            .dedupeThrottleSeconds(logDedupeThrottleSeconds)
+            .redactSecrets(logRedactSecrets)
+            .summaryOnShutdown(logSummaryOnShutdown)
+            .build();
     }
 }

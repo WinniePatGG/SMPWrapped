@@ -1,5 +1,7 @@
 package de.winniepat.smpwrapped.wrapped;
 
+import de.winniepat.smpwrapped.log.LogContext;
+import de.winniepat.smpwrapped.log.SMPLogger;
 import de.winniepat.smpwrapped.model.PlayerStats;
 
 import java.util.*;
@@ -7,10 +9,18 @@ import java.util.*;
 
 public final class ArchetypeEngine {
 
+    private static final SMPLogger LOG = SMPLogger.get("archetype");
+
     private ArchetypeEngine() {}
 
     
     public static ArchetypeResult determineArchetype(PlayerStats stats) {
+        if (stats == null) {
+            LOG.error("Cannot determine an archetype without stats");
+            return new ArchetypeResult("The Newcomer",
+                "Just getting started on their journey. Every legend begins with a single block.");
+        }
+
         
         boolean hasAnyStats = stats.getBlocksMined() > 0 || stats.getBlocksPlaced() > 0 ||
             stats.getDistanceTraveled() > 0 || stats.getMobsKilled() > 0 ||
@@ -18,6 +28,7 @@ public final class ArchetypeEngine {
             stats.getDeaths() > 0 || stats.getPlaytimeSeconds() > 0;
 
         if (!hasAnyStats) {
+            LOG.trace("Player has no recorded stats yet, assigning The Newcomer");
             return new ArchetypeResult("The Newcomer",
                 "Just getting started on their journey. Every legend begins with a single block.");
         }
@@ -53,8 +64,17 @@ public final class ArchetypeEngine {
         
         Map.Entry<String, Double> best = scores.entrySet().stream()
             .max(Map.Entry.comparingByValue())
-            .orElseThrow();
+            .orElse(null);
 
+        if (best == null) {
+            LOG.error("No archetype scores could be computed, falling back to The Newcomer",
+                LogContext.of("scoresComputed", scores.size()));
+            return new ArchetypeResult("The Newcomer",
+                "Just getting started on their journey. Every legend begins with a single block.");
+        }
+
+        LOG.trace("Determined archetype", LogContext.of(
+            "archetype", best.getKey(), "score", best.getValue(), "allScores", scores));
         return new ArchetypeResult(best.getKey(), getDescription(best.getKey()));
     }
 

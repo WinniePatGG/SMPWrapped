@@ -2,6 +2,8 @@ package de.winniepat.smpwrapped.web;
 
 import de.winniepat.smpwrapped.SMPWrapped;
 import de.winniepat.smpwrapped.config.PluginConfig;
+import de.winniepat.smpwrapped.log.LogContext;
+import de.winniepat.smpwrapped.log.SMPLogger;
 import de.winniepat.smpwrapped.model.*;
 import de.winniepat.smpwrapped.wrapped.WrappedGenerator;
 import io.javalin.Javalin;
@@ -13,11 +15,14 @@ import io.javalin.json.JavalinJackson;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.BindException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 
 public class WebServerManager {
+
+    private static final SMPLogger LOG = SMPLogger.get("web");
 
     private final SMPWrapped plugin;
     private Javalin app;
@@ -32,12 +37,17 @@ public class WebServerManager {
     public void start() {
         PluginConfig config = plugin.getConfigManager().get();
         if (!config.webEnabled()) {
-            plugin.getLogger().info("Web server is disabled in config.");
+            LOG.info("Web server is disabled in config");
             return;
         }
 
         rateLimiter = new RateLimiter(config.rateLimitRequestsPerMinute());
         adminAuth = new AdminAuth(plugin);
+
+        LOG.info("Starting the web server", LogContext.of(
+            "host", config.webHost(),
+            "port", config.webPort(),
+            "rateLimitPerMinute", config.rateLimitRequestsPerMinute()));
 
         
         
@@ -55,9 +65,12 @@ public class WebServerManager {
                 File webappDir = new File(plugin.getDataFolder(), "webapp");
                 if (webappDir.exists()) {
                     javalinConfig.staticFiles.add(webappDir.getAbsolutePath(), Location.EXTERNAL);
+                    LOG.debug("Serving the webapp from disk",
+                        LogContext.of("directory", webappDir.getAbsolutePath()));
                 } else {
                     
                     javalinConfig.staticFiles.add("/webapp", Location.CLASSPATH);
+                    LOG.debug("Serving the webapp from the plugin jar classpath");
                 }
 
                 
@@ -78,11 +91,39 @@ public class WebServerManager {
             setupErrorHandling();
 
             app.start(config.webHost(), config.webPort());
+        } catch (Throwable t) {
+            if (hasCause(t, BindException.class)) {
+                LOG.fatal("Web server could not bind its port, another process may already use it", t,
+                    LogContext.of("host", config.webHost(), "port", config.webPort()));
+            } else {
+                LOG.fatal("Web server failed to start", t, LogContext.of(
+                    "host", config.webHost(), "port", config.webPort()));
+            }
+            app = null;
+            throw t instanceof RuntimeException runtime ? runtime : new IllegalStateException(t);
         } finally {
             Thread.currentThread().setContextClassLoader(previousTccl);
         }
 
-        plugin.getLogger().info("Web server started on " + config.webHost() + ":" + config.webPort());
+        LOG.info("Web server started", LogContext.of(
+            "host", config.webHost(), "port", config.webPort()));
+
+        plugin.getServer().getScheduler().runTaskTimerAsynchronously(plugin,
+            () -> guardRateLimiterCleanup(), 20L * 60L, 20L * 60L);
+    }
+
+    private void guardRateLimiterCleanup() {
+        try {
+            if (rateLimiter != null) {
+                int before = rateLimiter.trackedClients();
+                rateLimiter.cleanup();
+                int after = rateLimiter.trackedClients();
+                LOG.trace("Rate limiter buckets cleaned up",
+                    LogContext.of("before", before, "after", after));
+            }
+        } catch (Throwable t) {
+            LOG.error("Rate limiter cleanup failed", t);
+        }
     }
 
     private void setupRoutes() {
@@ -106,22 +147,78 @@ public class WebServerManager {
         app.post("/api/v1/admin/seasons/{seasonId}/end", this::handleAdminEndSeason);
         app.post("/api/v1/admin/seasons/{seasonId}/publish", this::handleAdminPublishSeason);
         app.post("/api/v1/admin/seasons/{seasonId}/unpublish", this::handleAdminUnpublishSeason);
+        app.post("/api/v1/admin/seasons/{seasonId}/switch", this::handleAdminSwitchSeason);
         app.post("/api/v1/admin/backup", this::handleAdminBackup);
         app.post("/api/v1/admin/rebuild/{playerId}/{seasonId}", this::handleAdminRebuildSnapshot);
 
         
-        app.get("/api/<path>", ctx -> ctx.json(Map.of("error", "Not found")).status(HttpStatus.NOT_FOUND));
+        app.get("/api/<path>", ctx -> {
+            LOG.debug("Rejected unknown API route", LogContext.of("path", ctx.path(), "ip", ctx.ip()));
+            ctx.json(Map.of("error", "Not found")).status(HttpStatus.NOT_FOUND);
+        });
 
         
         
         app.get("/", this::handleRoot);
+
+        app.before(ctx -> applyRateLimit(ctx));
+    }
+
+    private void applyRateLimit(Context ctx) {
+        if (rateLimiter == null || !ctx.path().startsWith("/api/")) {
+            return;
+        }
+        if (rateLimiter.allowRequest(ctx.ip())) {
+            return;
+        }
+        LOG.warn("Rate limit exceeded", LogContext.of(
+            "ip", ctx.ip(),
+            "path", ctx.path(),
+            "limitPerMinute", plugin.getConfigManager().get().rateLimitRequestsPerMinute()));
+        ctx.json(Map.of("error", "Too many requests")).status(HttpStatus.TOO_MANY_REQUESTS);
+        ctx.skipRemainingHandlers();
     }
 
     private void setupErrorHandling() {
-        app.error(404, ctx -> ctx.json(Map.of("error", "Not found")).status(HttpStatus.NOT_FOUND));
+        app.error(404, ctx -> {
+            LOG.debug("Request not found", LogContext.of(
+                "path", ctx.path(), "method", String.valueOf(ctx.method()), "ip", ctx.ip()));
+            ctx.json(Map.of("error", "Not found")).status(HttpStatus.NOT_FOUND);
+        });
+
         app.error(500, ctx -> {
-            plugin.getLogger().severe("Internal server error: " + ctx.result());
+            LOG.error("Request failed with HTTP 500", null, LogContext.of(
+                "path", ctx.path(),
+                "method", String.valueOf(ctx.method()),
+                "ip", ctx.ip(),
+                "responseBody", ctx.result()));
             ctx.json(Map.of("error", "Internal server error")).status(HttpStatus.INTERNAL_SERVER_ERROR);
+        });
+
+        app.exception(Exception.class, (exception, ctx) -> {
+            LOG.error("Unhandled exception while handling a request", exception, LogContext.of(
+                "path", ctx.path(),
+                "method", String.valueOf(ctx.method()),
+                "ip", ctx.ip(),
+                "userAgent", ctx.userAgent()));
+            ctx.json(Map.of("error", "Internal server error")).status(HttpStatus.INTERNAL_SERVER_ERROR);
+        });
+
+        app.after(ctx -> {
+            Integer status = ctx.statusCode();
+            int code = status == null ? 0 : status;
+            Object[] context = LogContext.of(
+                "method", String.valueOf(ctx.method()),
+                "path", ctx.path(),
+                "status", code,
+                "ip", ctx.ip());
+            if (code >= 500) {
+                LOG.error("Request completed with a server error", context);
+            } else if (code >= 400) {
+                LOG.debug("Request completed with a client error", context);
+            } else {
+                LOG.trace("Request completed", context);
+            }
         });
     }
 
@@ -137,6 +234,7 @@ public class WebServerManager {
 
     private void handleSeasons(Context ctx) {
         List<Season> seasons = plugin.getSeasonManager().getAllSeasons();
+        String currentId = plugin.getSeasonManager().currentSeasonId();
         List<Map<String, Object>> result = new ArrayList<>();
         for (Season s : seasons) {
             Map<String, Object> map = new LinkedHashMap<>();
@@ -146,13 +244,15 @@ public class WebServerManager {
             map.put("endTime", s.endTime());
             map.put("state", s.state().name());
             map.put("active", s.isActive());
+            map.put("current", s.id().equals(currentId));
             result.add(map);
         }
         ctx.json(Map.of("seasons", result));
     }
 
     private void handleCurrentSeason(Context ctx) {
-        plugin.getSeasonManager().getCurrentSeason().ifPresentOrElse(
+        String currentId = plugin.getSeasonManager().currentSeasonId();
+        plugin.getDatabase().getSeason(currentId).ifPresentOrElse(
             season -> ctx.json(Map.of(
                 "id", season.id(),
                 "name", season.name(),
@@ -283,6 +383,8 @@ public class WebServerManager {
             snapshot = Optional.of(plugin.getWrappedGenerator().generateAndSave(playerId, seasonId, player.get().lastName()));
         }
 
+        LOG.debug("Served Wrapped snapshot", LogContext.of(
+            "player", playerId, "season", seasonId, "achievements", snapshot.get().achievements().size()));
         ctx.json(snapshot.get());
     }
 
@@ -325,7 +427,19 @@ public class WebServerManager {
     private void handleAdminCreateSeason(Context ctx) {
         if (!checkAuth(ctx)) return;
 
-        Map<String, Object> body = ctx.bodyAsClass(Map.class);
+        Map<String, Object> body;
+        try {
+            body = ctx.bodyAsClass(Map.class);
+        } catch (Throwable t) {
+            LOG.error("Could not parse the admin season request body", t, LogContext.of(
+                "path", ctx.path(), "ip", ctx.ip()));
+            ctx.json(Map.of("error", "Malformed JSON body")).status(HttpStatus.BAD_REQUEST);
+            return;
+        }
+        if (body == null) {
+            ctx.json(Map.of("error", "A JSON body is required")).status(HttpStatus.BAD_REQUEST);
+            return;
+        }
         String name = (String) body.get("name");
         String id = (String) body.get("id");
 
@@ -343,8 +457,23 @@ public class WebServerManager {
             return;
         }
 
-        Season season = plugin.getSeasonManager().createSeason(id, name);
-        ctx.json(Map.of("id", season.id(), "name", season.name(), "state", season.state().name()));
+        Season season;
+        try {
+            season = plugin.getSeasonManager().createSeason(id, name);
+        } catch (RuntimeException e) {
+            LOG.error("Could not create a season", e, LogContext.of("season", id, "name", name, "ip", ctx.ip()));
+            ctx.json(Map.of("error", "Could not create the season")).status(HttpStatus.INTERNAL_SERVER_ERROR);
+            return;
+        }
+        if (season == null) {
+            ctx.json(Map.of("error", "Could not create the season")).status(HttpStatus.INTERNAL_SERVER_ERROR);
+            return;
+        }
+        ctx.json(Map.of(
+            "id", season.id(),
+            "name", season.name(),
+            "state", season.state().name(),
+            "current", season.id().equals(plugin.getSeasonManager().currentSeasonId())));
     }
 
     private void handleAdminEndSeason(Context ctx) {
@@ -374,6 +503,16 @@ public class WebServerManager {
             ctx.json(Map.of("message", "Season unpublished", "seasonId", seasonId));
         } else {
             ctx.json(Map.of("error", "Failed to unpublish season")).status(HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    private void handleAdminSwitchSeason(Context ctx) {
+        if (!checkAuth(ctx)) return;
+        String seasonId = ctx.pathParam("seasonId");
+        if (plugin.getSeasonManager().switchSeason(seasonId)) {
+            ctx.json(Map.of("message", "Now recording into season", "seasonId", seasonId));
+        } else {
+            ctx.json(Map.of("error", "Failed to switch season")).status(HttpStatus.BAD_REQUEST);
         }
     }
 
@@ -412,14 +551,30 @@ public class WebServerManager {
 
     
 
+    private static boolean hasCause(Throwable throwable, Class<? extends Throwable> type) {
+        Throwable current = throwable;
+        int guard = 0;
+        while (current != null && guard++ < 20) {
+            if (type.isInstance(current)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
     private boolean checkAuth(Context ctx) {
         String authHeader = ctx.header("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            LOG.warn("Rejected admin request without a bearer token", LogContext.of(
+                "path", ctx.path(), "method", String.valueOf(ctx.method()), "ip", ctx.ip()));
             ctx.json(Map.of("error", "Unauthorized")).status(HttpStatus.UNAUTHORIZED);
             return false;
         }
         String token = authHeader.substring(7);
         if (!adminAuth.validateToken(token)) {
+            LOG.warn("Rejected admin request with an invalid token", LogContext.of(
+                "path", ctx.path(), "method", String.valueOf(ctx.method()), "ip", ctx.ip()));
             ctx.json(Map.of("error", "Invalid token")).status(HttpStatus.UNAUTHORIZED);
             return false;
         }
@@ -442,10 +597,13 @@ public class WebServerManager {
                 cached = new String(in.readAllBytes(), StandardCharsets.UTF_8);
             }
         } catch (IOException e) {
-            plugin.getLogger().warning("Failed to read webapp/index.html: " + e.getMessage());
+            LOG.error("Failed to read webapp/index.html from the plugin jar", e);
+        } catch (Throwable t) {
+            LOG.error("Unexpected failure while reading webapp/index.html", t);
         }
         if (cached == null) {
-            plugin.getLogger().warning("webapp/index.html not found in the plugin JAR; serving placeholder.");
+            LOG.warn("webapp/index.html not found in the plugin jar; serving placeholder",
+                LogContext.of("hint", "Run the frontend build (npm run build) and rebuild the plugin jar"));
             cached = "<!DOCTYPE html><html><head><title>SMPWrapped</title></head>" +
                      "<body><h1>SMPWrapped</h1><p>Frontend not built yet. Run the frontend build.</p></body></html>";
         }
@@ -454,9 +612,16 @@ public class WebServerManager {
     }
 
     public void stop() {
-        if (app != null) {
-            app.stop();
-            plugin.getLogger().info("Web server stopped.");
+        Javalin current = app;
+        if (current == null) {
+            return;
+        }
+        app = null;
+        try {
+            current.stop();
+            LOG.info("Web server stopped");
+        } catch (Throwable t) {
+            LOG.error("Web server did not shut down cleanly", t);
         }
     }
 }

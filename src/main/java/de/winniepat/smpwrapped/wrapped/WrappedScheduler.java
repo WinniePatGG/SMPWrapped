@@ -2,6 +2,8 @@ package de.winniepat.smpwrapped.wrapped;
 
 import de.winniepat.smpwrapped.SMPWrapped;
 import de.winniepat.smpwrapped.config.PluginConfig;
+import de.winniepat.smpwrapped.log.LogContext;
+import de.winniepat.smpwrapped.log.SMPLogger;
 import de.winniepat.smpwrapped.model.TrackedPlayer;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -27,6 +29,8 @@ import java.util.concurrent.TimeUnit;
 
 public final class WrappedScheduler {
 
+    private static final SMPLogger LOG = SMPLogger.get("scheduler");
+
     private static final long CHECK_INTERVAL_SECONDS = 30L;
 
     private final SMPWrapped plugin;
@@ -42,7 +46,7 @@ public final class WrappedScheduler {
     public void start() {
         PluginConfig config = plugin.getConfigManager().get();
         if (!config.weeklyWrappedEnabled() && !config.monthlyWrappedEnabled()) {
-            plugin.getLogger().info("Scheduled Wrapped generation is disabled.");
+            LOG.info("Scheduled Wrapped generation is disabled");
             return;
         }
 
@@ -61,6 +65,7 @@ public final class WrappedScheduler {
 
     public void stop() {
         if (executor != null) {
+            LOG.info("Stopping the Wrapped scheduler");
             executor.shutdownNow();
             executor = null;
         }
@@ -68,14 +73,16 @@ public final class WrappedScheduler {
 
     private void logSchedule(PluginConfig config) {
         if (config.weeklyWrappedEnabled()) {
-            plugin.getLogger().info("Weekly Wrapped generation scheduled for "
-                + DayOfWeek.of(config.weeklyWrappedDayOfWeek()) + " at "
-                + formatTime(config.weeklyWrappedHour(), config.weeklyWrappedMinute()) + " (server time).");
+            LOG.info("Weekly Wrapped generation scheduled", LogContext.of(
+                "day", DayOfWeek.of(config.weeklyWrappedDayOfWeek()).name(),
+                "time", formatTime(config.weeklyWrappedHour(), config.weeklyWrappedMinute()),
+                "checkIntervalSeconds", CHECK_INTERVAL_SECONDS));
         }
         if (config.monthlyWrappedEnabled()) {
-            plugin.getLogger().info("Monthly Wrapped generation scheduled for day "
-                + config.monthlyWrappedDay() + " at "
-                + formatTime(config.monthlyWrappedHour(), config.monthlyWrappedMinute()) + " (server time).");
+            LOG.info("Monthly Wrapped generation scheduled", LogContext.of(
+                "dayOfMonth", config.monthlyWrappedDay(),
+                "time", formatTime(config.monthlyWrappedHour(), config.monthlyWrappedMinute()),
+                "checkIntervalSeconds", CHECK_INTERVAL_SECONDS));
         }
     }
 
@@ -95,6 +102,8 @@ public final class WrappedScheduler {
                     
                     lastWeeklyRun = nowMillis;
                     saveState();
+                    LOG.info("Running the scheduled weekly Wrapped generation", LogContext.of(
+                        "targetMillis", target, "missedByMillis", nowMillis - target));
                     generateAll("weekly");
                 }
             }
@@ -104,33 +113,76 @@ public final class WrappedScheduler {
                 if (nowMillis >= target && lastMonthlyRun < target) {
                     lastMonthlyRun = nowMillis;
                     saveState();
+                    LOG.info("Running the scheduled monthly Wrapped generation", LogContext.of(
+                        "targetMillis", target, "missedByMillis", nowMillis - target));
                     generateAll("monthly");
                 }
             }
-        } catch (Exception e) {
-            plugin.getLogger().warning("Wrapped scheduler error: " + e.getMessage());
+        } catch (Throwable t) {
+            LOG.error("Wrapped scheduler tick failed", t, LogContext.of(
+                "weeklyEnabled", safeWeeklyEnabled(),
+                "monthlyEnabled", safeMonthlyEnabled()));
+        }
+    }
+
+    private boolean safeWeeklyEnabled() {
+        try {
+            return plugin.getConfigManager().get().weeklyWrappedEnabled();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private boolean safeMonthlyEnabled() {
+        try {
+            return plugin.getConfigManager().get().monthlyWrappedEnabled();
+        } catch (Throwable t) {
+            return false;
         }
     }
 
     
     private void generateAll(String reason) {
         String seasonId = plugin.getConfigManager().get().currentSeasonId();
-        List<TrackedPlayer> players = plugin.getDatabase().getAllPlayers();
+        List<TrackedPlayer> players;
+        try {
+            players = plugin.getDatabase().getAllPlayers();
+        } catch (Throwable t) {
+            LOG.error("Could not load players for the scheduled Wrapped generation", t, LogContext.of(
+                "reason", reason, "season", seasonId));
+            return;
+        }
+
         int generated = 0;
+        int failed = 0;
+        int skipped = 0;
         for (TrackedPlayer player : players) {
             if (player.optedOut()) {
+                skipped++;
                 continue;
             }
             try {
                 plugin.getWrappedGenerator().generateAndSave(player.uuid(), seasonId, player.lastName());
                 generated++;
-            } catch (Exception e) {
-                plugin.getLogger().warning("Failed to generate " + reason + " Wrapped for "
-                    + player.lastName() + ": " + e.getMessage());
+            } catch (Throwable t) {
+                failed++;
+                LOG.error("Failed to generate " + reason + " Wrapped for a player", t, LogContext.of(
+                    "reason", reason, "season", seasonId,
+                    "player", player.lastName(), "uuid", player.uuid()));
             }
         }
-        plugin.getLogger().info("Generated " + generated + "/" + players.size()
-            + " " + reason + " Wrapped snapshots.");
+
+        if (failed > 0) {
+            LOG.error("Scheduled Wrapped generation finished with failures", null, LogContext.of(
+                "reason", reason, "season", seasonId,
+                "players", players.size(), "generated", generated,
+                "failed", failed, "skippedOptedOut", skipped));
+        } else {
+            LOG.info("Scheduled Wrapped generation finished", LogContext.of(
+                "reason", reason, "season", seasonId,
+                "players", players.size(), "generated", generated,
+                "skippedOptedOut", skipped));
+        }
         notifyPlayers(reason, generated);
     }
 
@@ -138,19 +190,31 @@ public final class WrappedScheduler {
         if (generated <= 0) {
             return;
         }
-        plugin.getServer().getScheduler().runTask(plugin, () -> {
-            String base = plugin.getConfigManager().get().publicBaseUrl();
-            if (base != null && base.endsWith("/")) {
-                base = base.substring(0, base.length() - 1);
-            }
-            for (Player player : plugin.getServer().getOnlinePlayers()) {
-                String url = base + "/w/" + player.getName();
-                player.sendMessage(Component.text("[SMPWrapped] ", NamedTextColor.GREEN)
-                    .append(Component.text("Your " + reason + " Wrapped is ready! ", NamedTextColor.WHITE))
-                    .append(Component.text("Click to open", NamedTextColor.AQUA)
-                        .clickEvent(ClickEvent.openUrl(url))));
-            }
-        });
+        try {
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                try {
+                    String base = plugin.getConfigManager().get().publicBaseUrl();
+                    if (base != null && base.endsWith("/")) {
+                        base = base.substring(0, base.length() - 1);
+                    }
+                    for (Player player : plugin.getServer().getOnlinePlayers()) {
+                        String url = base + "/w/" + player.getName();
+                        player.sendMessage(Component.text("[SMPWrapped] ", NamedTextColor.GREEN)
+                            .append(Component.text("Your " + reason + " Wrapped is ready! ", NamedTextColor.WHITE))
+                            .append(Component.text("Click to open", NamedTextColor.AQUA)
+                                .clickEvent(ClickEvent.openUrl(url))));
+                    }
+                    LOG.debug("Notified online players", LogContext.of(
+                        "reason", reason, "notified", plugin.getServer().getOnlinePlayers().size()));
+                } catch (Throwable t) {
+                    LOG.error("Could not notify players about their new Wrapped", t,
+                        LogContext.of("reason", reason));
+                }
+            });
+        } catch (Throwable t) {
+            LOG.error("Could not schedule the Wrapped notification", t,
+                LogContext.of("reason", reason));
+        }
     }
 
     private LocalDateTime weeklyTarget(LocalDateTime now, PluginConfig config) {
@@ -179,6 +243,7 @@ public final class WrappedScheduler {
     private void loadState() {
         File file = stateFile();
         if (!file.exists()) {
+            LOG.debug("No schedule state file yet", LogContext.of("file", file.getName()));
             return;
         }
         Properties props = new Properties();
@@ -186,8 +251,11 @@ public final class WrappedScheduler {
             props.load(in);
             lastWeeklyRun = parseLong(props.getProperty("weekly"));
             lastMonthlyRun = parseLong(props.getProperty("monthly"));
-        } catch (Exception e) {
-            plugin.getLogger().warning("Failed to load schedule state: " + e.getMessage());
+            LOG.debug("Schedule state loaded", LogContext.of(
+                "lastWeeklyRun", lastWeeklyRun, "lastMonthlyRun", lastMonthlyRun));
+        } catch (Throwable t) {
+            LOG.error("Failed to load the schedule state file; schedules may run twice after a restart", t,
+                LogContext.of("file", file.getAbsolutePath()));
         }
     }
 
@@ -195,10 +263,12 @@ public final class WrappedScheduler {
         Properties props = new Properties();
         props.setProperty("weekly", Long.toString(lastWeeklyRun));
         props.setProperty("monthly", Long.toString(lastMonthlyRun));
-        try (OutputStream out = new FileOutputStream(stateFile())) {
+        File file = stateFile();
+        try (OutputStream out = new FileOutputStream(file)) {
             props.store(out, "SMPWrapped schedule last-run timestamps");
-        } catch (Exception e) {
-            plugin.getLogger().warning("Failed to save schedule state: " + e.getMessage());
+        } catch (Throwable t) {
+            LOG.error("Failed to save the schedule state file", t,
+                LogContext.of("file", file.getAbsolutePath()));
         }
     }
 
@@ -209,6 +279,7 @@ public final class WrappedScheduler {
         try {
             return Long.parseLong(value.trim());
         } catch (NumberFormatException e) {
+            LOG.warn("Ignoring an unparsable schedule timestamp", LogContext.of("value", value));
             return 0L;
         }
     }

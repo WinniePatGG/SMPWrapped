@@ -9,12 +9,19 @@ public class RateLimiter {
     private final ConcurrentHashMap<String, Bucket> buckets = new ConcurrentHashMap<>();
 
     public RateLimiter(int maxRequestsPerMinute) {
-        this.maxRequestsPerMinute = maxRequestsPerMinute;
+        this.maxRequestsPerMinute = Math.max(1, maxRequestsPerMinute);
     }
 
     public boolean allowRequest(String key) {
-        Bucket bucket = buckets.computeIfAbsent(key, k -> new Bucket());
+        if (key == null) {
+            return true;
+        }
+        Bucket bucket = buckets.computeIfAbsent(key, k -> new Bucket(maxRequestsPerMinute));
         return bucket.tryConsume();
+    }
+
+    public int trackedClients() {
+        return buckets.size();
     }
 
     public void cleanup() {
@@ -22,8 +29,13 @@ public class RateLimiter {
     }
 
     private static class Bucket {
+        private final int limit;
         private final AtomicInteger count = new AtomicInteger(0);
         private volatile long windowStart = System.currentTimeMillis();
+
+        Bucket(int limit) {
+            this.limit = limit;
+        }
 
         synchronized boolean tryConsume() {
             long now = System.currentTimeMillis();
@@ -31,7 +43,7 @@ public class RateLimiter {
                 windowStart = now;
                 count.set(0);
             }
-            return count.incrementAndGet() <= 60; 
+            return count.incrementAndGet() <= limit;
         }
 
         boolean isExpired() {

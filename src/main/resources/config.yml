@@ -19,6 +19,13 @@ database:
   path: smpwrapped.db
 
 # Current season
+# All tracked stats are recorded under this id. The admin commands keep this value
+# up to date for you, so you rarely need to edit it by hand.
+# The season lifecycle is: create -> play -> end -> publish
+#   /wrapped admin create <name>   creates the season, makes it current and ends the old one
+#   /wrapped admin switch <season> records stats into an existing season
+#   /wrapped admin end <season>    stops the season, optionally auto-publishing it
+#   /wrapped admin publish <season> archives it (its Wrapped stays readable)
 season:
   current: season-1
 
@@ -78,6 +85,7 @@ share-card:
 
 # Publication settings
 publication:
+  # Publish (archive) a season automatically as soon as it is ended
   auto-publish-on-end: false
 
 # Scheduled automatic Wrapped generation.
@@ -96,3 +104,38 @@ schedule:
     day: 1
     # 24-hour time, HH:mm
     time: "20:00"
+
+# Advanced logging
+# Every failure is logged with a full stack trace, the thread it happened on and
+# structured key=value context. Errors are also written to plugins/SMPWrapped/logs/.
+logging:
+  # Minimum level that gets logged: TRACE, DEBUG, INFO, WARN, ERROR, FATAL
+  level: INFO
+  # Mirror log records to the server console
+  console: true
+  # Rotate a structured log file next to the database
+  file:
+    enabled: true
+    # Rotate once the file grows past this size (0 = never rotate)
+    max-size-mb: 5
+    # How many rotated .gz archives to keep
+    keep-files: 5
+    # Async queue size. Lines are dropped (and counted) if the disk cannot keep up.
+    queue-capacity: 8192
+  # Print full stack traces with error entries
+  stack-traces: true
+  # Maximum stack frames per exception (cause chain shares this budget)
+  stack-trace-depth: 30
+  # Collapse identical repeating errors instead of flooding the console
+  dedupe:
+    enabled: true
+    # Log this many occurrences, then start throttling
+    threshold: 5
+    # Occurrence counter resets after this many seconds
+    window-seconds: 300
+    # Minimum seconds between two logs of the same error once throttling starts
+    throttle-seconds: 300
+  # Replace secrets (tokens, passwords, bearer headers) with ***REDACTED***
+  redact-secrets: true
+  # Print an error/warning count summary when the plugin shuts down
+  summary-on-shutdown: true

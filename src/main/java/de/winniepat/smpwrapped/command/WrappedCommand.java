@@ -1,6 +1,8 @@
 package de.winniepat.smpwrapped.command;
 
 import de.winniepat.smpwrapped.SMPWrapped;
+import de.winniepat.smpwrapped.log.LogContext;
+import de.winniepat.smpwrapped.log.SMPLogger;
 import de.winniepat.smpwrapped.model.*;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -13,6 +15,8 @@ import java.util.*;
 
 public class WrappedCommand implements CommandExecutor, TabCompleter {
 
+    private static final SMPLogger LOG = SMPLogger.get("command");
+
     private final SMPWrapped plugin;
 
     public WrappedCommand(SMPWrapped plugin) {
@@ -21,18 +25,30 @@ public class WrappedCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length == 0) {
-            sendWrappedLink(sender);
-            return true;
-        }
+        try {
+            LOG.trace("Command executed", LogContext.of(
+                "sender", sender.getName(),
+                "label", label,
+                "args", String.join(" ", args)));
+            if (args.length == 0) {
+                sendWrappedLink(sender);
+                return true;
+            }
 
-        switch (args[0].toLowerCase()) {
-            case "stats" -> handleStats(sender);
-            case "top" -> handleTop(sender);
-            case "help" -> handleHelp(sender);
-            case "reload" -> handleReload(sender);
-            case "admin" -> handleAdmin(sender, args);
-            default -> sender.sendMessage(Component.text("Unknown subcommand. Use /wrapped help for help.", NamedTextColor.RED));
+            switch (args[0].toLowerCase()) {
+                case "stats" -> handleStats(sender);
+                case "top" -> handleTop(sender);
+                case "help" -> handleHelp(sender);
+                case "reload" -> handleReload(sender);
+                case "admin" -> handleAdmin(sender, args);
+                default -> sender.sendMessage(Component.text("Unknown subcommand. Use /wrapped help for help.", NamedTextColor.RED));
+            }
+        } catch (Throwable t) {
+            LOG.error("Command handler failed", t, LogContext.of(
+                "sender", sender.getName(),
+                "label", label,
+                "args", String.join(" ", args)));
+            sender.sendMessage(Component.text("Something went wrong while running that command. Check the server log.", NamedTextColor.RED));
         }
         return true;
     }
@@ -90,9 +106,13 @@ public class WrappedCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(Component.text("/wrapped reload - Reload configuration", NamedTextColor.YELLOW));
         if (sender.hasPermission("smpwrapped.admin")) {
             sender.sendMessage(Component.text("=== Admin Commands ===", NamedTextColor.GOLD));
-            sender.sendMessage(Component.text("/wrapped admin create <name> - Create a season", NamedTextColor.YELLOW));
+            sender.sendMessage(Component.text("/wrapped admin create <name> - Create and activate a season", NamedTextColor.YELLOW));
+            sender.sendMessage(Component.text("/wrapped admin seasons - List all seasons", NamedTextColor.YELLOW));
+            sender.sendMessage(Component.text("/wrapped admin switch <season> - Record stats into another season", NamedTextColor.YELLOW));
             sender.sendMessage(Component.text("/wrapped admin end <season> - End a season", NamedTextColor.YELLOW));
-            sender.sendMessage(Component.text("/wrapped admin publish <season> - Publish a season", NamedTextColor.YELLOW));
+            sender.sendMessage(Component.text("/wrapped admin publish <season> - Publish (archive) a season", NamedTextColor.YELLOW));
+            sender.sendMessage(Component.text("/wrapped admin unpublish <season> - Bring a season back to ENDED", NamedTextColor.YELLOW));
+            sender.sendMessage(Component.text("/wrapped admin stats <player> - Show a player's stats", NamedTextColor.YELLOW));
             sender.sendMessage(Component.text("/wrapped admin backup - Create database backup", NamedTextColor.YELLOW));
         }
     }
@@ -102,9 +122,15 @@ public class WrappedCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(Component.text("You don't have permission to use this command.", NamedTextColor.RED));
             return;
         }
-        plugin.getConfigManager().reload();
-        plugin.getStatTracker().flushAll();
-        sender.sendMessage(Component.text("Configuration reloaded and stats flushed.", NamedTextColor.GREEN));
+        try {
+            plugin.getConfigManager().reload();
+            plugin.getStatTracker().flushAll();
+            sender.sendMessage(Component.text("Configuration reloaded and stats flushed.", NamedTextColor.GREEN));
+            LOG.info("Configuration reloaded from chat", LogContext.of("sender", sender.getName()));
+        } catch (Throwable t) {
+            LOG.error("Reload failed", t, LogContext.of("sender", sender.getName()));
+            sender.sendMessage(Component.text("Reload failed, check the server log for details.", NamedTextColor.RED));
+        }
     }
 
     private void handleAdmin(CommandSender sender, String[] args) {
@@ -126,8 +152,19 @@ public class WrappedCommand implements CommandExecutor, TabCompleter {
                 }
                 String name = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
                 String id = name.toLowerCase().replaceAll("[^a-z0-9]+", "-");
-                plugin.getSeasonManager().createSeason(id, name);
-                sender.sendMessage(Component.text("Created season: " + name + " (" + id + ")", NamedTextColor.GREEN));
+                try {
+                    Season season = plugin.getSeasonManager().createSeason(id, name);
+                    if (season == null) {
+                        sender.sendMessage(Component.text("Could not create the season.", NamedTextColor.RED));
+                        return;
+                    }
+                    sender.sendMessage(Component.text("Created and activated season: " + name + " (" + id + ")", NamedTextColor.GREEN));
+                    sender.sendMessage(Component.text("Stats are now recorded into " + id + ".", NamedTextColor.YELLOW));
+                } catch (RuntimeException e) {
+                    LOG.error("Could not create a season", e, LogContext.of(
+                        "sender", sender.getName(), "season", id, "name", name));
+                    sender.sendMessage(Component.text("Could not create the season. Check the server log.", NamedTextColor.RED));
+                }
             }
             case "end" -> {
                 if (args.length < 3) {
@@ -151,6 +188,39 @@ public class WrappedCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage(Component.text("Published season: " + seasonId, NamedTextColor.GREEN));
                 } else {
                     sender.sendMessage(Component.text("Failed to publish season.", NamedTextColor.RED));
+                }
+            }
+            case "unpublish" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(Component.text("Usage: /wrapped admin unpublish <season>", NamedTextColor.RED));
+                    return;
+                }
+                String seasonId = args[2];
+                if (plugin.getSeasonManager().unpublishSeason(seasonId)) {
+                    sender.sendMessage(Component.text("Unpublished season: " + seasonId, NamedTextColor.GREEN));
+                } else {
+                    sender.sendMessage(Component.text("Failed to unpublish season.", NamedTextColor.RED));
+                }
+            }
+            case "switch" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(Component.text("Usage: /wrapped admin switch <season>", NamedTextColor.RED));
+                    return;
+                }
+                String seasonId = args[2];
+                if (plugin.getSeasonManager().switchSeason(seasonId)) {
+                    sender.sendMessage(Component.text("Now recording into season: " + seasonId, NamedTextColor.GREEN));
+                } else {
+                    sender.sendMessage(Component.text("Failed to switch season. Check the server log.", NamedTextColor.RED));
+                }
+            }
+            case "seasons" -> {
+                sender.sendMessage(Component.text("=== Seasons ===", NamedTextColor.GOLD));
+                String current = plugin.getSeasonManager().currentSeasonId();
+                for (Season season : plugin.getSeasonManager().getAllSeasons()) {
+                    sender.sendMessage(Component.text(
+                        (season.id().equals(current) ? "* " : "  ") + season.id() + " [" + season.state() + "] " + season.name(),
+                        season.isActive() ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
                 }
             }
             case "stats" -> {
@@ -200,9 +270,10 @@ public class WrappedCommand implements CommandExecutor, TabCompleter {
                 completions.add("admin");
             }
         } else if (args.length == 2 && args[0].equalsIgnoreCase("admin")) {
-            completions.addAll(List.of("create", "end", "publish", "stats", "backup"));
+            completions.addAll(List.of("create", "seasons", "switch", "end", "publish", "unpublish", "stats", "backup"));
         } else if (args.length == 3 && args[0].equalsIgnoreCase("admin")) {
-            if (args[1].equalsIgnoreCase("end") || args[1].equalsIgnoreCase("publish")) {
+            if (args[1].equalsIgnoreCase("switch") || args[1].equalsIgnoreCase("end")
+                || args[1].equalsIgnoreCase("publish") || args[1].equalsIgnoreCase("unpublish")) {
                 completions.addAll(plugin.getSeasonManager().getAllSeasons().stream()
                     .map(Season::id)
                     .toList());

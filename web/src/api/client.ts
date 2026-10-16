@@ -24,6 +24,7 @@ export interface Season {
   endTime: number
   state: 'ACTIVE' | 'ENDED' | 'ARCHIVED' | 'DRAFT'
   active: boolean
+  current?: boolean
 }
 
 export interface Player {
@@ -96,6 +97,11 @@ export interface LeaderboardEntry {
 export interface ServerStats {
   seasonId: string
   stats: Record<string, number>
+}
+
+export function pickSeason(seasons: Season[] | undefined): Season | undefined {
+  if (!seasons || seasons.length === 0) return undefined
+  return seasons.find((s) => s.current) ?? seasons.find((s) => s.active) ?? seasons[0]
 }
 
 export const api = {

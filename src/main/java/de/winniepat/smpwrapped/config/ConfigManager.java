@@ -1,6 +1,9 @@
 package de.winniepat.smpwrapped.config;
 
 import de.winniepat.smpwrapped.SMPWrapped;
+import de.winniepat.smpwrapped.log.LogContext;
+import de.winniepat.smpwrapped.log.LogLevel;
+import de.winniepat.smpwrapped.log.SMPLogger;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import java.time.DayOfWeek;
@@ -8,6 +11,8 @@ import java.util.*;
 
 
 public final class ConfigManager {
+
+    private static final SMPLogger LOG = SMPLogger.get("config");
 
     private final SMPWrapped plugin;
     private PluginConfig config;
@@ -17,6 +22,18 @@ public final class ConfigManager {
     }
 
     public void load() {
+        try {
+            doLoad();
+        } catch (RuntimeException e) {
+            LOG.fatal("Configuration could not be loaded", e);
+            throw e;
+        } catch (Throwable t) {
+            LOG.fatal("Configuration could not be loaded", t);
+            throw new IllegalStateException("Configuration load failed", t);
+        }
+    }
+
+    private void doLoad() {
         plugin.saveDefaultConfig();
         FileConfiguration cfg = plugin.getConfig();
 
@@ -73,6 +90,21 @@ public final class ConfigManager {
         cfg.addDefault("schedule.monthly.day", 1);
         cfg.addDefault("schedule.monthly.time", "20:00");
 
+        cfg.addDefault("logging.level", "INFO");
+        cfg.addDefault("logging.console", true);
+        cfg.addDefault("logging.file.enabled", true);
+        cfg.addDefault("logging.file.max-size-mb", 5L);
+        cfg.addDefault("logging.file.keep-files", 5);
+        cfg.addDefault("logging.file.queue-capacity", 8192);
+        cfg.addDefault("logging.stack-traces", true);
+        cfg.addDefault("logging.stack-trace-depth", 30);
+        cfg.addDefault("logging.dedupe.enabled", true);
+        cfg.addDefault("logging.dedupe.threshold", 5);
+        cfg.addDefault("logging.dedupe.window-seconds", 300L);
+        cfg.addDefault("logging.dedupe.throttle-seconds", 300L);
+        cfg.addDefault("logging.redact-secrets", true);
+        cfg.addDefault("logging.summary-on-shutdown", true);
+
         cfg.options().copyDefaults(true);
         plugin.saveConfig();
 
@@ -123,6 +155,49 @@ public final class ConfigManager {
         }
         int[] monthlyTime = parseTime(cfg.getString("schedule.monthly.time", "20:00"), "schedule.monthly.time", errors);
 
+        
+        String logLevel = LogLevel.parse(cfg.getString("logging.level", "INFO"), LogLevel.INFO).name();
+        String requestedLevel = cfg.getString("logging.level", "INFO");
+        if (!requestedLevel.equalsIgnoreCase(logLevel)) {
+            LOG.warn("Unknown logging level, falling back to INFO",
+                LogContext.of("configured", requestedLevel, "fallback", logLevel));
+        }
+
+        int logKeepFiles = cfg.getInt("logging.file.keep-files", 5);
+        if (logKeepFiles < 0 || logKeepFiles > 100) {
+            errors.add("logging.file.keep-files must be between 0 and 100");
+        }
+
+        int logQueueCapacity = cfg.getInt("logging.file.queue-capacity", 8192);
+        if (logQueueCapacity < 256 || logQueueCapacity > 1_000_000) {
+            errors.add("logging.file.queue-capacity must be between 256 and 1000000");
+        }
+
+        int logStackTraceDepth = cfg.getInt("logging.stack-trace-depth", 30);
+        if (logStackTraceDepth < 0 || logStackTraceDepth > 500) {
+            errors.add("logging.stack-trace-depth must be between 0 and 500");
+        }
+
+        int logDedupeThreshold = cfg.getInt("logging.dedupe.threshold", 5);
+        if (logDedupeThreshold < 0) {
+            errors.add("logging.dedupe.threshold must not be negative");
+        }
+
+        long logDedupeWindowSeconds = cfg.getLong("logging.dedupe.window-seconds", 300L);
+        if (logDedupeWindowSeconds < 1) {
+            errors.add("logging.dedupe.window-seconds must be at least 1");
+        }
+
+        long logDedupeThrottleSeconds = cfg.getLong("logging.dedupe.throttle-seconds", 300L);
+        if (logDedupeThrottleSeconds < 0) {
+            errors.add("logging.dedupe.throttle-seconds must not be negative");
+        }
+
+        long logMaxFileSizeMb = cfg.getLong("logging.file.max-size-mb", 5L);
+        if (logMaxFileSizeMb < 0) {
+            errors.add("logging.file.max-size-mb must not be negative");
+        }
+
         String adminToken = cfg.getString("admin.token", "");
         boolean generatedNewToken = false;
         if (adminToken == null || adminToken.isBlank()) {
@@ -136,7 +211,7 @@ public final class ConfigManager {
 
         if (!errors.isEmpty()) {
             for (String err : errors) {
-                plugin.getLogger().severe("Config validation error: " + err);
+                LOG.error("Config validation error", LogContext.of("reason", err));
             }
             throw new IllegalStateException("Configuration validation failed with " + errors.size() + " error(s)");
         }
@@ -180,15 +255,29 @@ public final class ConfigManager {
             cfg.getBoolean("schedule.monthly.enabled", true),
             monthlyDay,
             monthlyTime[0],
-            monthlyTime[1]
+            monthlyTime[1],
+            logLevel,
+            cfg.getBoolean("logging.console", true),
+            cfg.getBoolean("logging.file.enabled", true),
+            logMaxFileSizeMb,
+            logKeepFiles,
+            logQueueCapacity,
+            cfg.getBoolean("logging.stack-traces", true),
+            logStackTraceDepth,
+            cfg.getBoolean("logging.dedupe.enabled", true),
+            logDedupeThreshold,
+            logDedupeWindowSeconds,
+            logDedupeThrottleSeconds,
+            cfg.getBoolean("logging.redact-secrets", true),
+            cfg.getBoolean("logging.summary-on-shutdown", true)
         );
 
-        plugin.getLogger().info("Configuration loaded successfully.");
+        LOG.info("Configuration loaded successfully");
         if (generatedNewToken) {
-            plugin.getLogger().info("Generated new admin API token (saved to config.yml): " + adminToken);
-            plugin.getLogger().info("Store this token securely.");
+            LOG.info("Generated a new admin API token and saved it to config.yml",
+                LogContext.of("hint", "Read admin.token from config.yml"));
         } else {
-            plugin.getLogger().info("Admin API token loaded from config.yml.");
+            LOG.debug("Admin API token loaded from config.yml");
         }
     }
 
@@ -199,9 +288,51 @@ public final class ConfigManager {
         return config;
     }
 
+    public void setCurrentSeasonId(String seasonId) {
+        if (seasonId == null || seasonId.isBlank()) {
+            LOG.warn("Refusing to switch to a blank season id");
+            throw new IllegalArgumentException("seasonId must not be blank");
+        }
+        String previous = config == null ? null : config.currentSeasonId();
+        try {
+            plugin.getConfig().set("season.current", seasonId);
+            plugin.saveConfig();
+            plugin.reloadConfig();
+            load();
+        } catch (RuntimeException e) {
+            LOG.error("Could not make the new season current; rolling back season.current", e, LogContext.of(
+                "requestedSeason", seasonId, "previousSeason", previous));
+            restoreCurrentSeason(previous);
+            throw e;
+        }
+        LOG.info("Current season changed", LogContext.of(
+            "previousSeason", previous, "season", config.currentSeasonId()));
+    }
+
+    private void restoreCurrentSeason(String previous) {
+        if (previous == null || previous.isBlank()) {
+            return;
+        }
+        try {
+            plugin.getConfig().set("season.current", previous);
+            plugin.saveConfig();
+            plugin.reloadConfig();
+            load();
+        } catch (Throwable t) {
+            LOG.error("Could not roll back season.current, fix season.current manually in config.yml", t,
+                LogContext.of("expectedSeason", previous));
+        }
+    }
+
     public void reload() {
-        plugin.reloadConfig();
-        load();
+        try {
+            plugin.reloadConfig();
+            load();
+            LOG.info("Configuration reloaded");
+        } catch (Throwable t) {
+            LOG.error("Configuration reload failed", t);
+            throw t instanceof RuntimeException runtime ? runtime : new IllegalStateException(t);
+        }
     }
 
     
