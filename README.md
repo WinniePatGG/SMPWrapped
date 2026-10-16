@@ -63,7 +63,7 @@ dashboard at `http://localhost:8080`.
 Configuration for the test server lives in `build/server/plugins/SMPWrapped/config.yml`.
 Override the server heap with `-Psmppwrapped.memory`, e.g. `./gradlew runServer -Psmppwrapped.memory=4G`.
 
-If the server or dashboard misbehaves, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+If the server or dashboard misbehaves, see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 **IDE support**: shared run configurations are included in `.run/` for IntelliJ IDEA:
 - `Run Paper Server` — runs `runServer`
@@ -81,19 +81,19 @@ npm run build  # Production build (outputs to src/main/resources/webapp)
 
 ## Configuration
 
-See [CONFIGURATION.md](CONFIGURATION.md) for detailed configuration options.
+See [CONFIGURATION.md](docs/CONFIGURATION.md) for detailed configuration options.
 
 ## API Documentation
 
-See [API.md](API.md) for the complete REST API reference.
+See [API.md](docs/API.md) for the complete REST API reference.
 
 ## Commands & Permissions
 
-See [COMMANDS.md](COMMANDS.md) for all available commands and permissions.
+See [COMMANDS.md](docs/COMMANDS.md) for all available commands and permissions.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for security best practices and reverse proxy setup.
+See [SECURITY.md](docs/SECURITY.md) for security best practices and reverse proxy setup.
 
 ## Project Structure
 
