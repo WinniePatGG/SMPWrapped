@@ -36,9 +36,14 @@ GET /seasons/{seasonId}/leaderboards/{stat}
 
 ```
 GET /players/{playerId}
+GET /players/by-name/{playerName}
 GET /players/{playerId}/wrapped/{seasonId}
 GET /players/{playerId}/stats/{seasonId}
 ```
+
+`/players/by-name/{playerName}` resolves a Minecraft username to a tracked player
+(case-insensitive) and returns the same payload as `/players/{playerId}`. It is
+used by the Wrapped frontend to look a player up from the URL.
 
 ## Admin Endpoints
 

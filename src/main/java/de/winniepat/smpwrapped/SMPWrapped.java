@@ -43,6 +43,10 @@ public final class SMPWrapped extends JavaPlugin {
         statTracker = new StatTracker(this);
         getServer().getPluginManager().registerEvents(statTracker, this);
 
+        // Sample online sessions every minute (main thread) so playtime is
+        // attributed to the correct hour/day and dimension.
+        getServer().getScheduler().runTaskTimer(this, statTracker::sampleOnlinePlayers, 1200L, 1200L);
+
         // Initialize season management
         seasonManager = new SeasonManager(this);
 

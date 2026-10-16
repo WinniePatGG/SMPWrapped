@@ -368,6 +368,7 @@ public class DatabaseManager {
                     saveMapStat(conn, stats.getPlayerId().toString(), stats.getSeasonId(), "blocks_placed_by_type", stats.getBlocksPlacedByType());
                     saveMapStat(conn, stats.getPlayerId().toString(), stats.getSeasonId(), "mobs_killed_by_type", stats.getMobsKilledByType());
                     saveMapStat(conn, stats.getPlayerId().toString(), stats.getSeasonId(), "daily_playtime", stats.getDailyPlaytime());
+                    saveMapStat(conn, stats.getPlayerId().toString(), stats.getSeasonId(), "hourly_playtime", toStringKeyed(stats.getHourlyPlaytime()));
 
                     conn.commit();
                 } catch (SQLException e) {
@@ -402,8 +403,14 @@ public class DatabaseManager {
         }
     }
 
-    private String serializeMap(Map<String, Long> map) {
-        StringBuilder sb = new StringBuilder("{");
+    /** Convert an integer-keyed map (e.g. hour of day) into the string-keyed form used by JSON storage. */
+    private Map<String, Long> toStringKeyed(Map<Integer, Long> map) {
+        Map<String, Long> out = new LinkedHashMap<>();
+        map.forEach((k, v) -> out.put(String.valueOf(k), v));
+        return out;
+    }
+
+    private String serializeMap(Map<String, Long> map) {        StringBuilder sb = new StringBuilder("{");
         boolean first = true;
         for (Map.Entry<String, Long> entry : map.entrySet()) {
             if (!first) sb.append(",");
@@ -474,6 +481,13 @@ public class DatabaseManager {
             case "blocks_placed_by_type" -> map.forEach(stats::addBlockPlaced);
             case "mobs_killed_by_type" -> map.forEach(stats::addMobKilled);
             case "daily_playtime" -> map.forEach(stats::addDailyPlaytime);
+            case "hourly_playtime" -> map.forEach((hour, seconds) -> {
+                try {
+                    stats.addHourlyPlaytime(Integer.parseInt(hour), seconds);
+                } catch (NumberFormatException ignored) {
+                    // Skip malformed keys
+                }
+            });
         }
     }
 

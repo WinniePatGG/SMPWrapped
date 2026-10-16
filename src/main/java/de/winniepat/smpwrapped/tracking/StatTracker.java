@@ -12,22 +12,31 @@ import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.player.*;
 import org.bukkit.inventory.ItemStack;
 
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.*;
 
 /**
  * Core event listener that tracks player statistics.
  * Uses in-memory buffering with periodic database persistence.
+ *
+ * <p>Playtime is attributed incrementally with a periodic sample (see
+ * {@link #sampleOnlinePlayers()}) so we can also record <em>when</em> a player
+ * is active: per hour of day, per day, and per dimension.</p>
  */
 public class StatTracker implements Listener {
 
     private final SMPWrapped plugin;
     private final PlayerDataBuffer buffer;
-    private final Map<UUID, Long> sessionStartTimes = new HashMap<>();
+    /** Last time (epoch millis) we sampled each online player's session. */
+    private final Map<UUID, Long> lastSampleTimes = new HashMap<>();
     private final Map<UUID, String> playerDimensions = new HashMap<>();
 
     public StatTracker(SMPWrapped plugin) {
         this.plugin = plugin;
-        this.buffer = new PlayerDataBuffer(plugin.getConfigManager().get().currentSeasonId());
+        String seasonId = plugin.getConfigManager().get().currentSeasonId();
+        // Hydrate from the database on first use so counters survive restarts.
+        this.buffer = new PlayerDataBuffer(seasonId, id -> plugin.getDatabase().loadPlayerStats(id, seasonId));
     }
 
     public PlayerDataBuffer getBuffer() {
@@ -50,26 +59,67 @@ public class StatTracker implements Listener {
                 false
             ));
         }
-        sessionStartTimes.put(player.getUniqueId(), System.currentTimeMillis());
         playerDimensions.put(player.getUniqueId(), player.getWorld().getEnvironment().name());
 
         PlayerStats stats = buffer.getBuffer(player.getUniqueId());
         stats.addLoginSession();
+
+        // Make sure today is present in the daily map so unique-day tracking and
+        // "most active day" both work even for very short sessions.
+        String today = LocalDate.now().toString();
+        if (!stats.getDailyPlaytime().containsKey(today)) {
+            stats.addUniqueDay();
+        }
+        stats.addDailyPlaytime(today, 0L);
+        lastSampleTimes.put(player.getUniqueId(), System.currentTimeMillis());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerQuit(PlayerQuitEvent event) {
         if (!plugin.getConfigManager().get().trackPlaytime()) return;
         Player player = event.getPlayer();
-        Long loginTime = sessionStartTimes.remove(player.getUniqueId());
-        if (loginTime != null) {
-            long duration = (System.currentTimeMillis() - loginTime) / 1000;
-            if (duration > 0) {
-                PlayerStats stats = buffer.getBuffer(player.getUniqueId());
-                stats.addPlaytime(duration);
-            }
-        }
+
+        // Attribute the final slice of the session before the player is gone.
+        samplePlayer(player, System.currentTimeMillis());
+        lastSampleTimes.remove(player.getUniqueId());
         playerDimensions.remove(player.getUniqueId());
+
+        // Persist immediately so the web UI reflects the session right away.
+        flushPlayer(player.getUniqueId());
+    }
+
+    /**
+     * Attribute the time since the last sample to playtime, the current hour,
+     * the current day, and the player's current dimension. Must run on the
+     * server main thread.
+     */
+    private void samplePlayer(Player player, long now) {
+        UUID uuid = player.getUniqueId();
+        Long last = lastSampleTimes.put(uuid, now);
+        if (last == null) return;
+
+        long seconds = (now - last) / 1000;
+        if (seconds <= 0) return;
+
+        PlayerStats stats = buffer.getBuffer(uuid);
+        stats.addPlaytime(seconds);
+        stats.addHourlyPlaytime(LocalTime.now().getHour(), seconds);
+        stats.addDailyPlaytime(LocalDate.now().toString(), seconds);
+
+        String dimension = playerDimensions.computeIfAbsent(
+            uuid, id -> player.getWorld().getEnvironment().name());
+        stats.addDimensionTime(dimension, seconds);
+    }
+
+    /**
+     * Sample every online player. Scheduled on the main thread by the plugin.
+     */
+    public void sampleOnlinePlayers() {
+        if (!plugin.getConfigManager().get().trackPlaytime()) return;
+        long now = System.currentTimeMillis();
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            samplePlayer(player, now);
+        }
     }
 
     // === Block tracking ===
@@ -186,27 +236,9 @@ public class StatTracker implements Listener {
         if (!plugin.getConfigManager().get().trackDimensions()) return;
         Player player = event.getPlayer();
 
-        // Record time spent in previous dimension
-        String fromWorld = event.getFrom().getEnvironment().name();
-        Long loginTime = sessionStartTimes.get(player.getUniqueId());
-        if (loginTime != null) {
-            // This is simplified - in production you'd track per-dimension time more carefully
-        }
+        // Attribute time spent so far to the dimension the player is leaving.
+        samplePlayer(player, System.currentTimeMillis());
         playerDimensions.put(player.getUniqueId(), player.getWorld().getEnvironment().name());
-    }
-
-    // === Unique days tracking ===
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onPlayerJoinUniqueDay(PlayerJoinEvent event) {
-        Player player = event.getPlayer();
-        String today = java.time.LocalDate.now().toString();
-
-        // Check if player has already been counted for today
-        PlayerStats stats = buffer.getBuffer(player.getUniqueId());
-        // This is a simplification - in production you'd check the database
-        // For now, we count unique days on join
-        stats.addUniqueDay();
     }
 
     // === Flush all buffers to database ===
@@ -224,8 +256,10 @@ public class StatTracker implements Listener {
     }
 
     public void shutdown() {
+        // Capture the last slice of every online session before flushing.
+        sampleOnlinePlayers();
         flushAll();
-        sessionStartTimes.clear();
+        lastSampleTimes.clear();
         playerDimensions.clear();
     }
 }

@@ -48,6 +48,31 @@ export interface PlayerStats {
   uniqueDaysPlayed: number
 }
 
+export interface WrappedStats {
+  playtimeSeconds?: number
+  playtimeHours?: number
+  blocksMined?: number
+  blocksPlaced?: number
+  distanceTraveled?: number
+  mobsKilled?: number
+  deaths?: number
+  damageDealt?: number
+  damageReceived?: number
+  itemsCrafted?: number
+  itemsCollected?: number
+  fishingCatches?: number
+  loginSessions?: number
+  uniqueDaysPlayed?: number
+  topMinedBlock?: string
+  topMinedBlockCount?: number
+  topMob?: string
+  topMobCount?: number
+  topDimension?: string
+  topDay?: string
+  topHour?: number
+  [key: string]: any
+}
+
 export interface WrappedSnapshot {
   playerId: string
   seasonId: string
@@ -55,7 +80,7 @@ export interface WrappedSnapshot {
   generatedAt: number
   archetype: string
   archetypeDescription: string
-  stats: Record<string, any>
+  stats: WrappedStats
   achievements: string[]
   percentiles: Record<string, number>
   milestones: string[]
@@ -90,6 +115,7 @@ export const api = {
 
   // Players
   getPlayer: (playerId: string) => fetchApi<Player>(`/players/${playerId}`),
+  getPlayerByName: (playerName: string) => fetchApi<Player>(`/players/by-name/${encodeURIComponent(playerName)}`),
   getPlayerStats: (playerId: string, seasonId: string) =>
     fetchApi<PlayerStats>(`/players/${playerId}/stats/${seasonId}`),
   getPlayerWrapped: (playerId: string, seasonId: string) =>

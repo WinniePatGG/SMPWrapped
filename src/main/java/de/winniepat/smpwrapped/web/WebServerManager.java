@@ -98,6 +98,7 @@ public class WebServerManager {
         app.get("/api/v1/seasons/{seasonId}/leaderboards/{stat}", this::handleLeaderboard);
 
         // Players
+        app.get("/api/v1/players/by-name/{playerName}", this::handlePlayerByName);
         app.get("/api/v1/players/{playerId}", this::handlePlayer);
         app.get("/api/v1/players/{playerId}/wrapped/{seasonId}", this::handlePlayerWrapped);
         app.get("/api/v1/players/{playerId}/stats/{seasonId}", this::handlePlayerStats);
@@ -221,6 +222,27 @@ public class WebServerManager {
         }
 
         Optional<TrackedPlayer> opt = plugin.getDatabase().getPlayer(playerId);
+        if (opt.isEmpty()) {
+            ctx.json(Map.of("error", "Player not found")).status(HttpStatus.NOT_FOUND);
+            return;
+        }
+
+        TrackedPlayer player = opt.get();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("uuid", player.uuid().toString());
+        result.put("name", player.lastName());
+        result.put("firstSeen", player.firstSeen());
+        result.put("lastSeen", player.lastSeen());
+        ctx.json(result);
+    }
+
+    private void handlePlayerByName(Context ctx) {
+        String playerName = ctx.pathParam("playerName");
+
+        Optional<TrackedPlayer> opt = plugin.getDatabase().getAllPlayers().stream()
+            .filter(p -> p.lastName() != null && p.lastName().equalsIgnoreCase(playerName))
+            .findFirst();
+
         if (opt.isEmpty()) {
             ctx.json(Map.of("error", "Player not found")).status(HttpStatus.NOT_FOUND);
             return;

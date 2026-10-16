@@ -48,7 +48,9 @@ public class WrappedGenerator {
         statsMap.put("itemsCollected", stats.getItemsCollected());
         statsMap.put("fishingCatches", stats.getFishingCatches());
         statsMap.put("loginSessions", stats.getLoginSessions());
-        statsMap.put("uniqueDaysPlayed", stats.getUniqueDaysPlayed());
+        // Derive unique days from the daily activity map as well, so it stays
+        // accurate even if older data only had per-day buckets.
+        statsMap.put("uniqueDaysPlayed", Math.max(stats.getUniqueDaysPlayed(), stats.getDailyPlaytime().size()));
 
         // Top categories
         stats.getTopMinedBlock().ifPresent(e -> statsMap.put("topMinedBlock", e.getKey()));

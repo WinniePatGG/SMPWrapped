@@ -1,361 +1,545 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import type { ReactNode } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronLeft, ChevronRight, Share2, Copy, Check, ArrowLeft } from 'lucide-react'
-import { useApi } from '../hooks/useApi'
-import { api, WrappedSnapshot, Season } from '../api/client'
-import { PageLoader, ErrorState } from '../components/LoadingSkeleton'
-import PlayerAvatar from '../components/PlayerAvatar'
+import { ChevronLeft, ChevronRight, Pause, Play, X, ArrowRight, Sparkles, Pickaxe } from 'lucide-react'
+import { api, WrappedSnapshot } from '../api/client'
 import AnimatedCounter from '../components/AnimatedCounter'
+import PlayerAvatar from '../components/PlayerAvatar'
+import WrappedDashboard from '../components/WrappedDashboard'
+import {
+  bestPercentile,
+  formatDay,
+  formatDuration,
+  formatHour,
+  formatHours,
+  formatNumber,
+} from '../lib/wrapped'
+
+const AUTO_MS = 7000
+
+interface Slide {
+  id: string
+  bg: string
+  content: ReactNode
+}
 
 export default function WrappedPage() {
   const { playerName } = useParams<{ playerName: string }>()
+  const navigate = useNavigate()
+
+  const [wrapped, setWrapped] = useState<WrappedSnapshot | null>(null)
+  const [seasonName, setSeasonName] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const [view, setView] = useState<'story' | 'dashboard'>('story')
   const [currentSlide, setCurrentSlide] = useState(0)
-  const [direction, setDirection] = useState(0)
-  const [copied, setCopied] = useState(false)
+  const [direction, setDirection] = useState(1)
+  const [paused, setPaused] = useState(false)
+  const [progress, setProgress] = useState(0)
 
-  // First, we need to find the player by name to get their UUID
-  // For now, we'll use a placeholder approach - in production you'd have a search endpoint
-  const { data: seasonData } = useApi<{ seasons: Season[] }>(() => api.getSeasons())
-  const currentSeason = seasonData?.seasons?.find(s => s.active) || seasonData?.seasons?.[0]
+  // Load season -> player -> wrapped snapshot.
+  useEffect(() => {
+    if (!playerName) return
+    let cancelled = false
 
-  // Mock: In production, you'd look up the player by name first
-  // For demo purposes, we'll use a default UUID
-  const playerId = '00000000-0000-0000-0000-000000000000'
+    async function load() {
+      setLoading(true)
+      setError(null)
+      try {
+        const seasons = await api.getSeasons()
+        const season = seasons.seasons.find(s => s.active) || seasons.seasons[0]
+        if (!season) throw new Error('No season is available yet')
 
-  const { data: wrapped, loading, error, refetch } = useApi<WrappedSnapshot>(
-    () => api.getPlayerWrapped(playerId, currentSeason?.id || 'season-1'),
-    [currentSeason?.id]
+        const player = await api.getPlayerByName(playerName!)
+        const snapshot = await api.getPlayerWrapped(player.uuid, season.id)
+
+        if (cancelled) return
+        setWrapped(snapshot)
+        setSeasonName(season.name)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load your Wrapped')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [playerName])
+
+  const slides = useMemo<Slide[]>(
+    () => (wrapped ? buildSlides(wrapped, seasonName, () => setView('dashboard')) : []),
+    [wrapped, seasonName]
   )
 
-  const nextSlide = useCallback(() => {
-    if (!wrapped) return
-    const maxSlides = getSlideCount(wrapped)
-    if (currentSlide < maxSlides - 1) {
-      setDirection(1)
-      setCurrentSlide(prev => prev + 1)
-    }
-  }, [currentSlide, wrapped])
+  const goNext = useCallback(() => {
+    if (slides.length === 0) return
+    setDirection(1)
+    setProgress(0)
+    setCurrentSlide(s => Math.min(s + 1, slides.length - 1))
+  }, [slides.length])
 
-  const prevSlide = useCallback(() => {
-    if (currentSlide > 0) {
-      setDirection(-1)
-      setCurrentSlide(prev => prev - 1)
-    }
-  }, [currentSlide])
+  const goPrev = useCallback(() => {
+    if (slides.length === 0) return
+    setDirection(-1)
+    setProgress(0)
+    setCurrentSlide(s => Math.max(s - 1, 0))
+  }, [slides.length])
 
-  // Keyboard navigation
+  const goToDashboard = useCallback(() => setView('dashboard'), [])
+
+  // Auto-advance through the story like Spotify Wrapped.
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    if (view !== 'story' || paused) return
+    if (currentSlide >= slides.length - 1) return
+
+    const interval = window.setInterval(() => {
+      setProgress(p => Math.min(p + (50 / AUTO_MS) * 100, 100))
+    }, 50)
+
+    return () => window.clearInterval(interval)
+  }, [view, paused, currentSlide, slides.length])
+
+  useEffect(() => {
+    if (progress >= 100 && currentSlide < slides.length - 1) {
+      goNext()
+    }
+  }, [progress, currentSlide, slides.length, goNext])
+
+  // Keyboard navigation.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (view !== 'story') return
       if (e.key === 'ArrowRight' || e.key === ' ') {
         e.preventDefault()
-        nextSlide()
+        if (currentSlide >= slides.length - 1) goToDashboard()
+        else goNext()
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
-        prevSlide()
+        goPrev()
+      } else if (e.key === 'Escape') {
+        navigate('/')
       }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [nextSlide, prevSlide])
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [view, currentSlide, slides.length, goNext, goPrev, goToDashboard, navigate])
 
-  // Touch/swipe support
+  // Swipe navigation.
   useEffect(() => {
-    let touchStartX = 0
-    const handleTouchStart = (e: TouchEvent) => {
-      touchStartX = e.touches[0].clientX
+    let startX = 0
+    const onStart = (e: TouchEvent) => {
+      startX = e.touches[0].clientX
     }
-    const handleTouchEnd = (e: TouchEvent) => {
-      const diff = touchStartX - e.changedTouches[0].clientX
+    const onEnd = (e: TouchEvent) => {
+      const diff = startX - e.changedTouches[0].clientX
       if (Math.abs(diff) > 50) {
-        if (diff > 0) nextSlide()
-        else prevSlide()
+        if (diff > 0) {
+          if (currentSlide >= slides.length - 1) goToDashboard()
+          else goNext()
+        } else goPrev()
       }
     }
-    window.addEventListener('touchstart', handleTouchStart)
-    window.addEventListener('touchend', handleTouchEnd)
+    window.addEventListener('touchstart', onStart)
+    window.addEventListener('touchend', onEnd)
     return () => {
-      window.removeEventListener('touchstart', handleTouchStart)
-      window.removeEventListener('touchend', handleTouchEnd)
+      window.removeEventListener('touchstart', onStart)
+      window.removeEventListener('touchend', onEnd)
     }
-  }, [nextSlide, prevSlide])
+  }, [currentSlide, slides.length, goNext, goPrev, goToDashboard])
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.href)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  if (loading) return <StoryLoader />
+  if (error || !wrapped || slides.length === 0) {
+    return <StoryError message={error || 'Wrapped not found'} onBack={() => navigate('/')} />
   }
 
-  const handleShare = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `${wrapped?.playerName}'s Minecraft Wrapped`,
-          text: `Check out my Minecraft Wrapped! I'm ${wrapped?.archetype}!`,
-          url: window.location.href,
-        })
-      } catch (err) {
-        // User cancelled or share failed
-      }
-    } else {
-      handleCopyLink()
-    }
+  if (view === 'dashboard') {
+    return (
+      <WrappedDashboard
+        wrapped={wrapped}
+        seasonName={seasonName}
+        onReplay={() => {
+          setCurrentSlide(0)
+          setProgress(0)
+          setView('story')
+        }}
+      />
+    )
   }
 
-  if (loading) return <PageLoader />
-  if (error) return <ErrorState message={error} onRetry={refetch} />
-  if (!wrapped) return <ErrorState message="Wrapped not found" />
+  const slide = slides[Math.min(currentSlide, slides.length - 1)]
+  const isLast = currentSlide >= slides.length - 1
 
-  const slides = buildSlides(wrapped)
-  const slide = slides[currentSlide]
+  const handleSurfaceClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button, a')) return
+    if (isLast) goToDashboard()
+    else goNext()
+  }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Progress bar */}
-      <div className="fixed top-0 left-0 right-0 z-50 h-1 bg-surface-800">
+    <div className="fixed inset-0 overflow-hidden bg-[#05060a] select-none">
+      <AnimatePresence mode="wait" custom={direction}>
         <motion.div
-          className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500"
-          initial={{ width: 0 }}
-          animate={{ width: `${((currentSlide + 1) / slides.length) * 100}%` }}
-          transition={{ duration: 0.3 }}
-        />
-      </div>
-
-      {/* Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-surface-950/80 backdrop-blur-xl border-t border-surface-700/50">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2 text-surface-400 hover:text-white transition-colors">
-            <ArrowLeft className="w-4 h-4" />
-            <span className="text-sm">Back</span>
-          </Link>
-
-          <div className="flex items-center gap-4">
-            <button
-              onClick={prevSlide}
-              disabled={currentSlide === 0}
-              className="p-2 rounded-lg bg-surface-700/50 text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-surface-700 transition-colors"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-
-            <span className="text-surface-400 text-sm font-mono">
-              {currentSlide + 1} / {slides.length}
-            </span>
-
-            <button
-              onClick={nextSlide}
-              disabled={currentSlide === slides.length - 1}
-              className="p-2 rounded-lg bg-surface-700/50 text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-surface-700 transition-colors"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
+          key={slide.id}
+          custom={direction}
+          initial={{ opacity: 0, x: direction > 0 ? 80 : -80 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: direction > 0 ? -80 : 80 }}
+          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          className="absolute inset-0"
+          style={{ background: slide.bg }}
+          onClick={handleSurfaceClick}
+        >
+          <div className="h-full w-full flex flex-col items-center justify-center text-center px-6 sm:px-10 pt-20 pb-24">
+            <div className="w-full max-w-2xl">{slide.content}</div>
           </div>
+        </motion.div>
+      </AnimatePresence>
 
-          <div className="flex items-center gap-2">
-            <button onClick={handleCopyLink} className="p-2 rounded-lg bg-surface-700/50 text-white hover:bg-surface-700 transition-colors">
-              {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-            </button>
-            <button onClick={handleShare} className="p-2 rounded-lg bg-surface-700/50 text-white hover:bg-surface-700 transition-colors">
-              <Share2 className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Slide content */}
-      <div className="flex-1 flex items-center justify-center p-4 pt-8 pb-20">
-        <AnimatePresence mode="wait" custom={direction}>
-          <motion.div
-            key={currentSlide}
-            custom={direction}
-            initial={{ opacity: 0, x: direction > 0 ? 100 : -100 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: direction > 0 ? -100 : 100 }}
-            transition={{ duration: 0.4, ease: 'easeInOut' }}
-            className="w-full max-w-2xl"
+      {/* Top bar: progress segments + controls */}
+      <div className="absolute top-0 inset-x-0 z-30 px-4 pt-4 pb-8 bg-gradient-to-b from-black/50 to-transparent pointer-events-none">
+        <div className="max-w-3xl mx-auto flex items-center gap-3 pointer-events-auto">
+          <button
+            onClick={() => navigate('/')}
+            aria-label="Close"
+            className="p-2 -ml-2 text-white/80 hover:text-white transition-colors"
           >
-            {slide}
-          </motion.div>
-        </AnimatePresence>
-      </div>
-    </div>
-  )
-}
+            <X className="w-5 h-5" />
+          </button>
 
-function getSlideCount(wrapped: WrappedSnapshot): number {
-  return buildSlides(wrapped).length
-}
-
-function buildSlides(wrapped: WrappedSnapshot): JSX.Element[] {
-  const slides: JSX.Element[] = []
-
-  // Slide 1: Introduction
-  slides.push(
-    <div key="intro" className="text-center">
-      <PlayerAvatar uuid={wrapped.playerId} name={wrapped.playerName} size={96} className="mx-auto mb-6" />
-      <h1 className="text-4xl md:text-5xl font-display font-bold mb-2">{wrapped.playerName}</h1>
-      <p className="text-surface-400 text-lg">Minecraft Wrapped</p>
-      <p className="text-surface-500 text-sm mt-2">Season {wrapped.seasonId}</p>
-    </div>
-  )
-
-  // Slide 2: Time played
-  slides.push(
-    <div key="time" className="text-center">
-      <p className="text-surface-400 text-sm uppercase tracking-wider mb-2">Time Played</p>
-      <p className="text-6xl md:text-7xl font-display font-bold gradient-text mb-4">
-        <AnimatedCounter value={wrapped.stats.playtimeHours || 0} duration={2.5} />
-      </p>
-      <p className="text-surface-400 text-lg">hours this season</p>
-    </div>
-  )
-
-  // Slide 3: The Grind
-  slides.push(
-    <div key="grind" className="text-center">
-      <h2 className="text-2xl font-display font-bold mb-6">The Grind</h2>
-      <div className="grid grid-cols-3 gap-4">
-        <div className="glass-card p-4">
-          <p className="text-3xl font-bold text-emerald-400">
-            <AnimatedCounter value={wrapped.stats.blocksMined || 0} />
-          </p>
-          <p className="text-surface-400 text-sm">Blocks Mined</p>
-        </div>
-        <div className="glass-card p-4">
-          <p className="text-3xl font-bold text-cyan-400">
-            <AnimatedCounter value={wrapped.stats.blocksPlaced || 0} />
-          </p>
-          <p className="text-surface-400 text-sm">Blocks Placed</p>
-        </div>
-        <div className="glass-card p-4">
-          <p className="text-3xl font-bold text-violet-400">
-            <AnimatedCounter value={wrapped.stats.itemsCrafted || 0} />
-          </p>
-          <p className="text-surface-400 text-sm">Items Crafted</p>
-        </div>
-      </div>
-    </div>
-  )
-
-  // Slide 4: Explorer
-  slides.push(
-    <div key="explorer" className="text-center">
-      <h2 className="text-2xl font-display font-bold mb-6">The Explorer</h2>
-      <p className="text-5xl font-display font-bold gradient-text mb-4">
-        <AnimatedCounter value={wrapped.stats.distanceTraveled || 0} />
-      </p>
-      <p className="text-surface-400 text-lg">blocks traveled</p>
-      {wrapped.stats.topDimension && (
-        <p className="text-surface-500 text-sm mt-4">
-          Favorite dimension: <span className="text-emerald-400">{wrapped.stats.topDimension}</span>
-        </p>
-      )}
-    </div>
-  )
-
-  // Slide 5: Hunter
-  slides.push(
-    <div key="hunter" className="text-center">
-      <h2 className="text-2xl font-display font-bold mb-6">The Hunter</h2>
-      <p className="text-5xl font-display font-bold text-red-400 mb-4">
-        <AnimatedCounter value={wrapped.stats.mobsKilled || 0} />
-      </p>
-      <p className="text-surface-400 text-lg">mobs defeated</p>
-      {wrapped.stats.topMob && (
-        <p className="text-surface-500 text-sm mt-4">
-          Most defeated: <span className="text-red-400">{wrapped.stats.topMob}</span> ({wrapped.stats.topMobCount})
-        </p>
-      )}
-    </div>
-  )
-
-  // Slide 6: Survival
-  slides.push(
-    <div key="survival" className="text-center">
-      <h2 className="text-2xl font-display font-bold mb-6">The Survival Story</h2>
-      <p className="text-5xl font-display font-bold text-gold-400 mb-4">
-        <AnimatedCounter value={wrapped.stats.deaths || 0} />
-      </p>
-      <p className="text-surface-400 text-lg">deaths this season</p>
-      <p className="text-surface-500 text-sm mt-4">
-        {wrapped.stats.deaths === 0
-          ? "Flawless! Not a single death."
-          : wrapped.stats.deaths < 5
-          ? "Pretty good survival skills!"
-          : "Death is just part of the adventure!"}
-      </p>
-    </div>
-  )
-
-  // Slide 7: Archetype
-  slides.push(
-    <div key="archetype" className="text-center">
-      <p className="text-surface-400 text-sm uppercase tracking-wider mb-2">Your Archetype</p>
-      <h2 className="text-4xl md:text-5xl font-display font-bold gradient-text-gold mb-4">
-        {wrapped.archetype}
-      </h2>
-      <p className="text-surface-400 text-lg max-w-md mx-auto">{wrapped.archetypeDescription}</p>
-    </div>
-  )
-
-  // Slide 8: Achievements
-  slides.push(
-    <div key="achievements" className="text-center">
-      <h2 className="text-2xl font-display font-bold mb-6">Achievements</h2>
-      <div className="flex flex-wrap justify-center gap-3">
-        {wrapped.achievements.map((achievement, i) => (
-          <motion.span
-            key={achievement}
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: i * 0.1 }}
-            className="px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium"
-          >
-            {achievement}
-          </motion.span>
-        ))}
-      </div>
-    </div>
-  )
-
-  // Slide 9: Comparison
-  slides.push(
-    <div key="comparison" className="text-center">
-      <h2 className="text-2xl font-display font-bold mb-6">How You Compare</h2>
-      <div className="space-y-4">
-        {Object.entries(wrapped.percentiles).slice(0, 4).map(([stat, percentile]) => (
-          <div key={stat} className="flex items-center justify-between glass-card p-4">
-            <span className="text-surface-400 text-sm capitalize">{stat.replace(/_/g, ' ')}</span>
-            <div className="flex items-center gap-3">
-              <div className="w-32 h-2 bg-surface-700 rounded-full overflow-hidden">
-                <motion.div
-                  className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${percentile}%` }}
-                  transition={{ duration: 1, delay: 0.2 }}
+          <div className="flex-1 flex items-center gap-1.5">
+            {slides.map((s, i) => (
+              <div key={s.id} className="h-1 flex-1 rounded-full bg-white/25 overflow-hidden">
+                <div
+                  className="h-full bg-white rounded-full"
+                  style={{ width: i < currentSlide ? '100%' : i === currentSlide ? `${progress}%` : '0%' }}
                 />
               </div>
-              <span className="text-emerald-400 font-mono text-sm w-12 text-right">{percentile}%</span>
-            </div>
+            ))}
           </div>
-        ))}
-      </div>
-    </div>
-  )
 
-  // Slide 10: Finale
-  slides.push(
-    <div key="finale" className="text-center">
-      <h2 className="text-3xl font-display font-bold mb-4">That's a Wrap!</h2>
-      <p className="text-surface-400 text-lg mb-6">
-        Thanks for playing this season, {wrapped.playerName}!
-      </p>
-      <div className="glass-card p-6 inline-block">
-        <p className="text-surface-500 text-sm mb-2">Share your Wrapped</p>
-        <p className="text-emerald-400 font-mono text-sm">{window.location.href}</p>
+          <button
+            onClick={() => setPaused(p => !p)}
+            aria-label={paused ? 'Play' : 'Pause'}
+            className="p-2 -mr-2 text-white/80 hover:text-white transition-colors"
+          >
+            {paused ? <Play className="w-5 h-5" /> : <Pause className="w-5 h-5" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Side navigation */}
+      {currentSlide > 0 && (
+        <button
+          onClick={goPrev}
+          aria-label="Previous"
+          className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-black/20 text-white/70 hover:text-white hover:bg-black/40 transition-colors"
+        >
+          <ChevronLeft className="w-6 h-6" />
+        </button>
+      )}
+      {!isLast && (
+        <button
+          onClick={goNext}
+          aria-label="Next"
+          className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-black/20 text-white/70 hover:text-white hover:bg-black/40 transition-colors"
+        >
+          <ChevronRight className="w-6 h-6" />
+        </button>
+      )}
+
+      {/* Bottom hint */}
+      <div className="absolute bottom-0 inset-x-0 z-30 py-5 text-center pointer-events-none">
+        <p className="text-white/50 text-xs uppercase tracking-[0.3em]">
+          {isLast ? 'Tap to open your dashboard' : 'Tap to continue'}
+        </p>
       </div>
     </div>
   )
+}
+
+/* ---------------------------------- slides --------------------------------- */
+
+function Slide({ children }: { children: ReactNode }) {
+  return <div className="flex flex-col items-center">{children}</div>
+}
+
+function Kicker({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-[0.7rem] sm:text-sm font-semibold uppercase tracking-[0.35em] text-white/70 mb-5">
+      {children}
+    </p>
+  )
+}
+
+const BIG = 'font-display font-bold text-7xl sm:text-9xl tracking-tighter leading-none'
+
+function buildSlides(wrapped: WrappedSnapshot, seasonName: string, onFinish: () => void): Slide[] {
+  const s = wrapped.stats
+  const best = bestPercentile(wrapped.percentiles)
+
+  const slides: Slide[] = [
+    {
+      id: 'intro',
+      bg: 'linear-gradient(160deg,#1DB954 0%,#0f7a37 45%,#062d16 100%)',
+      content: (
+        <Slide>
+          <PlayerAvatar
+            uuid={wrapped.playerId}
+            name={wrapped.playerName}
+            size={112}
+            className="mx-auto mb-8 rounded-3xl shadow-2xl shadow-black/40"
+          />
+          <Kicker>SMP Wrapped</Kicker>
+          <h1 className="font-display font-bold text-5xl sm:text-7xl tracking-tight leading-none mb-4">
+            {wrapped.playerName}
+          </h1>
+          <p className="text-white/70 text-lg">Season {seasonName}</p>
+        </Slide>
+      ),
+    },
+    {
+      id: 'playtime',
+      bg: 'linear-gradient(160deg,#8E2DE2 0%,#4A00E0 55%,#160033 100%)',
+      content: (
+        <Slide>
+          <Kicker>You played for</Kicker>
+          <div className={`${BIG} mb-4`}>
+            <AnimatedCounter value={formatHours(s.playtimeSeconds)} format={v => v.toFixed(1)} />
+          </div>
+          <p className="text-3xl sm:text-4xl font-display font-semibold text-white/90">hours</p>
+          <p className="text-white/60 mt-8 text-lg">
+            {formatDuration(s.playtimeSeconds)} across {formatNumber(s.uniqueDaysPlayed)} days
+          </p>
+        </Slide>
+      ),
+    },
+    {
+      id: 'prime',
+      bg: 'linear-gradient(160deg,#FF8008 0%,#FF3D00 55%,#3a0d00 100%)',
+      content: (
+        <Slide>
+          <Kicker>You were most active</Kicker>
+          <h2 className="font-display font-bold text-4xl sm:text-6xl leading-tight mb-6">
+            {formatDay(s.topDay) || 'on every single day'}
+          </h2>
+          {s.topHour != null && (
+            <p className="text-2xl sm:text-3xl font-display font-semibold text-white/90">
+              usually around {formatHour(s.topHour)}
+            </p>
+          )}
+          <p className="text-white/60 mt-8 text-lg">That's your prime time</p>
+        </Slide>
+      ),
+    },
+    best
+      ? {
+          id: 'percentile',
+          bg: 'linear-gradient(160deg,#FF2D95 0%,#C2006B 55%,#3a0022 100%)',
+          content: (
+            <Slide>
+              <Kicker>Your strongest stat</Kicker>
+              <p className="text-xl sm:text-2xl text-white/80 mb-3">You're in the</p>
+              <div className={`${BIG} mb-5`}>TOP {best.top}%</div>
+              <p className="text-2xl sm:text-3xl font-display font-semibold text-white/90">of all players</p>
+              <p className="text-white/60 mt-8 text-lg">{best.label}</p>
+            </Slide>
+          ),
+        }
+      : {
+          id: 'percentile',
+          bg: 'linear-gradient(160deg,#FF2D95 0%,#C2006B 55%,#3a0022 100%)',
+          content: (
+            <Slide>
+              <Kicker>Leaderboards</Kicker>
+              <h2 className="font-display font-bold text-4xl sm:text-5xl leading-tight mb-6">
+                Not enough players to rank you yet
+              </h2>
+              <p className="text-white/60 text-lg">Bring a few friends along!</p>
+            </Slide>
+          ),
+        },
+    {
+      id: 'grind',
+      bg: 'linear-gradient(160deg,#00E0D1 0%,#0091A8 55%,#00323a 100%)',
+      content: (
+        <Slide>
+          <Kicker>You mined</Kicker>
+          <div className={`${BIG} mb-4`}>
+            <AnimatedCounter value={s.blocksMined || 0} />
+          </div>
+          <p className="text-3xl sm:text-4xl font-display font-semibold text-white/90">blocks</p>
+          {s.topMinedBlock && (
+            <p className="text-white/60 mt-8 text-lg">
+              Most of all: {String(s.topMinedBlock).replace(/_/g, ' ')}
+            </p>
+          )}
+        </Slide>
+      ),
+    },
+    {
+      id: 'hunter',
+      bg: 'linear-gradient(160deg,#FF416C 0%,#B3001B 55%,#3a0007 100%)',
+      content: (
+        <Slide>
+          <Kicker>You defeated</Kicker>
+          <div className={`${BIG} mb-4`}>
+            <AnimatedCounter value={s.mobsKilled || 0} />
+          </div>
+          <p className="text-3xl sm:text-4xl font-display font-semibold text-white/90">mobs</p>
+          {s.topMob && (
+            <p className="text-white/60 mt-8 text-lg">Mostly {String(s.topMob).replace(/_/g, ' ')}</p>
+          )}
+        </Slide>
+      ),
+    },
+    {
+      id: 'explorer',
+      bg: 'linear-gradient(160deg,#3A7BFF 0%,#143CB0 55%,#050B33 100%)',
+      content: (
+        <Slide>
+          <Kicker>You traveled</Kicker>
+          <div className={`${BIG} mb-4`}>
+            <AnimatedCounter value={s.distanceTraveled || 0} />
+          </div>
+          <p className="text-3xl sm:text-4xl font-display font-semibold text-white/90">blocks</p>
+          {s.topDimension && (
+            <p className="text-white/60 mt-8 text-lg">
+              Favourite dimension: {String(s.topDimension).replace(/_/g, ' ')}
+            </p>
+          )}
+        </Slide>
+      ),
+    },
+    {
+      id: 'survival',
+      bg: 'linear-gradient(160deg,#5B6478 0%,#2A3040 55%,#0A0D14 100%)',
+      content: (
+        <Slide>
+          <Kicker>You died</Kicker>
+          <div className={`${BIG} mb-4`}>
+            <AnimatedCounter value={s.deaths || 0} />
+          </div>
+          <p className="text-3xl sm:text-4xl font-display font-semibold text-white/90">
+            {(s.deaths || 0) === 1 ? 'time' : 'times'}
+          </p>
+          <p className="text-white/60 mt-8 text-lg">
+            {(s.deaths || 0) === 0
+              ? 'Flawless season. Untouchable.'
+              : (s.deaths || 0) < 5
+              ? 'Pretty solid survival skills.'
+              : 'Death is just part of the adventure.'}
+          </p>
+        </Slide>
+      ),
+    },
+    {
+      id: 'archetype',
+      bg: 'linear-gradient(160deg,#1B2A6B 0%,#0A1130 55%,#04060F 100%)',
+      content: (
+        <Slide>
+          <Kicker>Your archetype</Kicker>
+          <h2 className="font-display font-bold text-5xl sm:text-7xl gradient-text-gold leading-tight mb-8">
+            {wrapped.archetype}
+          </h2>
+          <p className="text-white/80 text-lg sm:text-xl max-w-xl mx-auto leading-relaxed">
+            {wrapped.archetypeDescription}
+          </p>
+        </Slide>
+      ),
+    },
+    {
+      id: 'achievements',
+      bg: 'linear-gradient(160deg,#12C2A0 0%,#0A6E5A 55%,#02241D 100%)',
+      content: (
+        <Slide>
+          <Kicker>You unlocked</Kicker>
+          <h2 className="font-display font-bold text-4xl sm:text-5xl mb-8">
+            {wrapped.achievements.length} achievements
+          </h2>
+          {wrapped.achievements.length > 0 ? (
+            <div className="flex flex-wrap justify-center gap-3">
+              {wrapped.achievements.map((a, i) => (
+                <motion.span
+                  key={a}
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.2 + i * 0.08 }}
+                  className="px-4 py-2 rounded-full bg-white/15 border border-white/25 text-white text-sm font-medium backdrop-blur-sm"
+                >
+                  {a}
+                </motion.span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-white/70 text-lg">Your first achievement is just around the corner.</p>
+          )}
+        </Slide>
+      ),
+    },
+    {
+      id: 'finale',
+      bg: 'linear-gradient(150deg,#1DB954 0%,#4A00E0 45%,#FF2D95 100%)',
+      content: (
+        <Slide>
+          <Sparkles className="w-12 h-12 mx-auto mb-6 text-white/80" />
+          <Kicker>That's a wrap</Kicker>
+          <h2 className="font-display font-bold text-4xl sm:text-6xl leading-tight mb-5">
+            Nice season, {wrapped.playerName}.
+          </h2>
+          <p className="text-white/75 text-lg mb-10">Here's everything you did, all in one place.</p>
+          <button
+            onClick={onFinish}
+            className="inline-flex items-center gap-2 px-8 py-4 rounded-full bg-white text-black font-semibold text-lg hover:scale-105 active:scale-95 transition-transform shadow-xl shadow-black/30"
+          >
+            Open your dashboard
+            <ArrowRight className="w-5 h-5" />
+          </button>
+        </Slide>
+      ),
+    },
+  ]
 
   return slides
+}
+
+/* -------------------------------- fallbacks -------------------------------- */
+
+function StoryLoader() {
+  return (
+    <div className="fixed inset-0 bg-[#05060a] flex flex-col items-center justify-center gap-6">
+      <motion.div
+        animate={{ scale: [1, 1.12, 1], rotate: [0, 6, 0] }}
+        transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+        className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-400 to-violet-500 flex items-center justify-center"
+      >
+        <Pickaxe className="w-8 h-8 text-black/80" />
+      </motion.div>
+      <p className="text-white/60 text-sm uppercase tracking-[0.3em]">Loading your Wrapped</p>
+    </div>
+  )
+}
+
+function StoryError({ message, onBack }: { message: string; onBack: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-[#05060a] flex items-center justify-center px-6">
+      <div className="text-center max-w-md">
+        <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+          <span className="text-2xl">🥲</span>
+        </div>
+        <h1 className="font-display font-bold text-2xl mb-3">No Wrapped here</h1>
+        <p className="text-white/60 mb-8">{message}</p>
+        <button
+          onClick={onBack}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-white text-black font-semibold hover:scale-105 active:scale-95 transition-transform"
+        >
+          Back to search
+        </button>
+      </div>
+    </div>
+  )
 }
