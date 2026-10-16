@@ -1,0 +1,81 @@
+# SMPWrapped Configuration
+# ========================
+
+# Web server settings
+web:
+  enabled: true
+  # Bind address - use 127.0.0.1 for localhost only (recommended)
+  # Use 0.0.0.0 only if you know what you're doing and have a firewall
+  host: 127.0.0.1
+  port: 8080
+  # Public base URL for share links (change to your domain)
+  public-base-url: http://localhost:8080
+  # Cache duration for web responses (seconds)
+  cache-seconds: 300
+
+# Database settings
+database:
+  # Path relative to plugin folder
+  path: smpwrapped.db
+
+# Current season
+season:
+  current: season-1
+
+# Tracking toggles
+tracking:
+  playtime: true
+  blocks: true
+  distance: true
+  mobs: true
+  deaths: true
+  damage: true
+  crafting: true
+  fishing: true
+  dimensions: true
+  sessions: true
+  achievements: true
+
+# Autosave interval (seconds)
+autosave:
+  interval-seconds: 120
+
+# Rate limiting
+rate-limit:
+  requests-per-minute: 60
+
+# Admin settings
+admin:
+  # API token for admin endpoints - CHANGE THIS!
+  # Generated automatically on first start if not set
+  token: ""
+
+# Leaderboard settings
+leaderboard:
+  public: true
+  min-sample-size: 3
+
+# Privacy settings
+privacy:
+  player-profiles-public: true
+  allow-player-opt-out: true
+
+# Avatar settings
+avatar:
+  # URL template for player avatars. {uuid} will be replaced with player UUID
+  # Set to empty string to disable avatars
+  url-template: "https://mc-heads.net/avatar/{uuid}/64"
+
+# Server branding
+branding:
+  server-name: "Our SMP Server"
+  server-icon-url: ""
+
+# Share card settings
+share-card:
+  enabled: true
+  footer: "Wrapped with SMPWrapped"
+
+# Publication settings
+publication:
+  auto-publish-on-end: false

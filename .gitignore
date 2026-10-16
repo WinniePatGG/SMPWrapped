@@ -1,4 +1,6 @@
 .gradle
 .idea
+.run
 build
-run
+images
+web/node_modules

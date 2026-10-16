@@ -2,9 +2,23 @@ name: SMPWrapped
 description: $description
 version: '${version}'
 
-main: de.winniepat.sMPWrapped.SMPWrapped
-api-version: '1.21.11'
+main: de.winniepat.smpwrapped.SMPWrapped
+api-version: '1.21'
 load: POSTWORLD
 
 authors: [ WinniePatGG ]
 website: https://winniepat.de
+
+commands:
+  wrapped:
+    description: SMPWrapped main command
+    usage: /wrapped [stats|top|help|reload|admin]
+    permission: smpwrapped.use
+
+permissions:
+  smpwrapped.use:
+    description: Allows use of /wrapped
+    default: true
+  smpwrapped.admin:
+    description: Allows use of admin commands
+    default: op
