@@ -123,4 +123,18 @@ class PlayerDataBufferTest {
         assertThat(buffer.hasBuffer(first)).isFalse();
         assertThat(buffer.hasBuffer(second)).isTrue();
     }
+
+    @Test
+    @DisplayName("peekBuffer never creates a buffer")
+    void peekBufferDoesNotCreate() {
+        UUID player = UUID.randomUUID();
+        PlayerDataBuffer buffer = new PlayerDataBuffer("season-1", id -> null);
+
+        assertThat(buffer.peekBuffer(player)).isEmpty();
+        assertThat(buffer.hasBuffer(player)).isFalse();
+        assertThat(buffer.peekBuffer(null)).isEmpty();
+
+        buffer.getBuffer(player);
+        assertThat(buffer.peekBuffer(player)).isPresent();
+    }
 }

@@ -17,11 +17,14 @@ import org.bukkit.inventory.ItemStack;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 
 public class StatTracker implements Listener {
 
     private static final SMPLogger LOG = SMPLogger.get("tracking");
+
+    private static final double MAX_STEP_DISTANCE = 150.0;
 
     private final SMPWrapped plugin;
     private final PlayerDataBuffer buffer;
@@ -29,6 +32,7 @@ public class StatTracker implements Listener {
     private volatile String seasonId;
     private final Map<UUID, Long> lastSampleTimes = new HashMap<>();
     private final Map<UUID, String> playerDimensions = new HashMap<>();
+    private final Set<UUID> dirtyPlayers = ConcurrentHashMap.newKeySet();
 
     public StatTracker(SMPWrapped plugin) {
         this.plugin = plugin;
@@ -63,6 +67,7 @@ public class StatTracker implements Listener {
         }
 
         buffer.clear();
+        dirtyPlayers.clear();
         try {
             buffer.setSeasonId(newSeasonId);
         } catch (RuntimeException e) {
@@ -82,6 +87,15 @@ public class StatTracker implements Listener {
         return buffer;
     }
 
+    public int dirtyPlayerCount() {
+        return dirtyPlayers.size();
+    }
+
+    private PlayerStats markDirty(UUID playerId) {
+        dirtyPlayers.add(playerId);
+        return buffer.getBuffer(playerId);
+    }
+
     
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -89,20 +103,19 @@ public class StatTracker implements Listener {
         guard("onPlayerJoin", () -> {
             Player player = event.getPlayer();
             if (!plugin.getConfigManager().get().trackPlaytime()) return;
-            if (!player.hasPlayedBefore()) {
-                
-                plugin.getDatabase().upsertPlayer(new TrackedPlayer(
-                    player.getUniqueId(),
-                    player.getName(),
-                    System.currentTimeMillis(),
-                    System.currentTimeMillis(),
-                    false
-                ));
-            }
+
+            plugin.getDatabase().upsertPlayer(new TrackedPlayer(
+                player.getUniqueId(),
+                player.getName(),
+                System.currentTimeMillis(),
+                System.currentTimeMillis(),
+                false
+            ));
+
             String dimension = player.getWorld().getEnvironment().name();
             playerDimensions.put(player.getUniqueId(), dimension);
 
-            PlayerStats stats = buffer.getBuffer(player.getUniqueId());
+            PlayerStats stats = markDirty(player.getUniqueId());
             stats.addLoginSession();
 
             
@@ -153,7 +166,7 @@ public class StatTracker implements Listener {
             return;
         }
 
-        PlayerStats stats = buffer.getBuffer(uuid);
+        PlayerStats stats = markDirty(uuid);
         stats.addPlaytime(seconds);
         stats.addHourlyPlaytime(LocalTime.now().getHour(), seconds);
         stats.addDailyPlaytime(LocalDate.now().toString(), seconds);
@@ -183,6 +196,38 @@ public class StatTracker implements Listener {
     
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlayerMove(PlayerMoveEvent event) {
+        if (!plugin.getConfigManager().get().trackDistance()) return;
+
+        Location to = event.getTo();
+        if (to == null) return;
+
+        Location from = event.getFrom();
+        if (from.getBlockX() == to.getBlockX()
+            && from.getBlockY() == to.getBlockY()
+            && from.getBlockZ() == to.getBlockZ()) {
+            return;
+        }
+
+        double dx = to.getX() - from.getX();
+        double dy = to.getY() - from.getY();
+        double dz = to.getZ() - from.getZ();
+        double step = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (!Double.isFinite(step) || step <= 0.0) {
+            return;
+        }
+        if (step > MAX_STEP_DISTANCE) {
+            LOG.trace("Ignoring an implausible movement step (teleport)",
+                LogContext.of("player", event.getPlayer().getName(), "step", step));
+            return;
+        }
+
+        markDirty(event.getPlayer().getUniqueId()).addDistance(step);
+    }
+
+    
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
         if (!plugin.getConfigManager().get().trackBlocks()) return;
         Player player = event.getPlayer();
@@ -191,7 +236,7 @@ public class StatTracker implements Listener {
         Material material = event.getBlock().getType();
         if (material.isAir()) return;
 
-        PlayerStats stats = buffer.getBuffer(player.getUniqueId());
+        PlayerStats stats = markDirty(player.getUniqueId());
         stats.addBlocksMined(1);
         stats.addBlockMined(material.name(), 1);
     }
@@ -204,7 +249,7 @@ public class StatTracker implements Listener {
         Material material = event.getBlock().getType();
         if (material.isAir()) return;
 
-        PlayerStats stats = buffer.getBuffer(player.getUniqueId());
+        PlayerStats stats = markDirty(player.getUniqueId());
         stats.addBlocksPlaced(1);
         stats.addBlockPlaced(material.name(), 1);
     }
@@ -219,7 +264,7 @@ public class StatTracker implements Listener {
         if (killer == null) return;
 
         String entityType = entity.getType().name();
-        PlayerStats stats = buffer.getBuffer(killer.getUniqueId());
+        PlayerStats stats = markDirty(killer.getUniqueId());
         stats.addMobsKilled(1);
         stats.addMobKilled(entityType, 1);
     }
@@ -230,7 +275,7 @@ public class StatTracker implements Listener {
     public void onPlayerDeath(PlayerDeathEvent event) {
         if (!plugin.getConfigManager().get().trackDeaths()) return;
         Player player = event.getEntity();
-        PlayerStats stats = buffer.getBuffer(player.getUniqueId());
+        PlayerStats stats = markDirty(player.getUniqueId());
         stats.addDeath();
     }
 
@@ -241,12 +286,12 @@ public class StatTracker implements Listener {
         if (!plugin.getConfigManager().get().trackDamage()) return;
 
         if (event.getDamager() instanceof Player player) {
-            PlayerStats stats = buffer.getBuffer(player.getUniqueId());
+            PlayerStats stats = markDirty(player.getUniqueId());
             stats.addDamageDealt((long) event.getDamage());
         }
 
         if (event.getEntity() instanceof Player player) {
-            PlayerStats stats = buffer.getBuffer(player.getUniqueId());
+            PlayerStats stats = markDirty(player.getUniqueId());
             stats.addDamageReceived((long) event.getDamage());
         }
     }
@@ -261,7 +306,7 @@ public class StatTracker implements Listener {
         ItemStack result = event.getRecipe().getResult();
         int amount = result.getAmount();
 
-        PlayerStats stats = buffer.getBuffer(player.getUniqueId());
+        PlayerStats stats = markDirty(player.getUniqueId());
         stats.addItemsCrafted(amount);
     }
 
@@ -271,7 +316,7 @@ public class StatTracker implements Listener {
     public void onItemPickup(PlayerPickupItemEvent event) {
         if (!plugin.getConfigManager().get().trackCrafting()) return;
         Player player = event.getPlayer();
-        PlayerStats stats = buffer.getBuffer(player.getUniqueId());
+        PlayerStats stats = markDirty(player.getUniqueId());
         stats.addItemsCollected(event.getItem().getItemStack().getAmount());
     }
 
@@ -283,7 +328,7 @@ public class StatTracker implements Listener {
         if (event.getState() != PlayerFishEvent.State.CAUGHT_FISH) return;
         if (!(event.getPlayer() instanceof Player player)) return;
 
-        PlayerStats stats = buffer.getBuffer(player.getUniqueId());
+        PlayerStats stats = markDirty(player.getUniqueId());
         stats.addFishingCatch();
     }
 
@@ -306,33 +351,48 @@ public class StatTracker implements Listener {
     
 
     public void flushAll() {
-        Map<UUID, PlayerStats> all = buffer.getAllBuffers();
+        Set<UUID> pending = new HashSet<>(dirtyPlayers);
+        dirtyPlayers.removeAll(pending);
+        if (pending.isEmpty()) {
+            LOG.trace("Nothing to flush, no stats changed since the last autosave");
+            return;
+        }
+
         int saved = 0;
         int failed = 0;
-        for (Map.Entry<UUID, PlayerStats> entry : all.entrySet()) {
+        for (UUID playerId : pending) {
+            PlayerStats stats = buffer.peekBuffer(playerId).orElse(null);
+            if (stats == null) {
+                continue;
+            }
             try {
-                plugin.getDatabase().savePlayerStats(entry.getValue());
+                plugin.getDatabase().savePlayerStats(stats);
                 saved++;
             } catch (Throwable t) {
                 failed++;
+                dirtyPlayers.add(playerId);
                 LOG.error("Could not flush a player stat buffer", t, LogContext.of(
-                    "player", entry.getKey(),
-                    "season", entry.getValue().getSeasonId()));
+                    "player", playerId, "season", stats.getSeasonId()));
             }
         }
+
         if (failed > 0) {
             LOG.error("Flushing player stats finished with failures", null, LogContext.of(
-                "requested", all.size(), "saved", saved, "failed", failed));
+                "pending", pending.size(), "saved", saved, "failed", failed));
         } else {
-            LOG.info("Flushed player stat buffers to the database",
-                LogContext.of("buffers", all.size()));
+            LOG.info("Flushed player stat buffers to the database", LogContext.of(
+                "flushed", saved, "tracked", buffer.getAllBuffers().size()));
         }
     }
 
     public void flushPlayer(UUID playerId) {
+        PlayerStats stats = buffer.peekBuffer(playerId).orElse(null);
+        if (stats == null) {
+            return;
+        }
         try {
-            PlayerStats stats = buffer.getBuffer(playerId);
             plugin.getDatabase().savePlayerStats(stats);
+            dirtyPlayers.remove(playerId);
         } catch (Throwable t) {
             LOG.error("Could not flush a player stat buffer", t, LogContext.of("player", playerId));
         }
@@ -347,6 +407,7 @@ public class StatTracker implements Listener {
         } finally {
             lastSampleTimes.clear();
             playerDimensions.clear();
+            dirtyPlayers.clear();
             LOG.info("Stat tracker stopped");
         }
     }

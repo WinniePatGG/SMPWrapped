@@ -145,4 +145,71 @@ class PlayerStatsTest {
         assertThat(topDimension.get().getKey()).isEqualTo("NETHER");
         assertThat(topDimension.get().getValue()).isEqualTo(500L);
     }
+
+    @Test
+    @DisplayName("Sub block movements accumulate into whole blocks")
+    void subBlockMovesAccumulate() {
+        PlayerStats stats = new PlayerStats(UUID.randomUUID(), "season-1");
+
+        for (int tick = 0; tick < 400; tick++) {
+            stats.addDistance(0.25);
+        }
+
+        assertThat(stats.getDistanceTraveled()).isEqualTo(100L);
+    }
+
+    @Test
+    @DisplayName("Fractional block totals round instead of truncating")
+    void fractionalTotalsRound() {
+        PlayerStats stats = new PlayerStats(UUID.randomUUID(), "season-1");
+
+        stats.addDistance(10.6);
+
+        assertThat(stats.getDistanceTraveled()).isEqualTo(11L);
+    }
+
+    @Test
+    @DisplayName("Whole block distances are still accepted")
+    void wholeBlockDistances() {
+        PlayerStats stats = new PlayerStats(UUID.randomUUID(), "season-1");
+
+        stats.addDistance(50_000);
+
+        assertThat(stats.getDistanceTraveled()).isEqualTo(50_000L);
+    }
+
+    @Test
+    @DisplayName("Invalid distances are ignored")
+    void invalidDistancesAreIgnored() {
+        PlayerStats stats = new PlayerStats(UUID.randomUUID(), "season-1");
+
+        stats.addDistance(-50);
+        stats.addDistance(0);
+        stats.addDistance(Double.NaN);
+        stats.addDistance(Double.POSITIVE_INFINITY);
+
+        assertThat(stats.getDistanceTraveled()).isZero();
+    }
+
+    @Test
+    @DisplayName("Distance survives a merge")
+    void distanceMerges() {
+        UUID playerId = UUID.randomUUID();
+        PlayerStats first = new PlayerStats(playerId, "season-1");
+        first.addDistance(120.4);
+
+        PlayerStats second = new PlayerStats(playerId, "season-1");
+        second.addDistance(80.4);
+
+        first.merge(second);
+
+        assertThat(first.getDistanceTraveled()).isEqualTo(201L);
+    }
+
+    @Test
+    @DisplayName("Distance starts at zero")
+    void distanceStartsAtZero() {
+        PlayerStats stats = new PlayerStats(UUID.randomUUID(), "season-1");
+        assertThat(stats.getDistanceTraveled()).isZero();
+    }
 }

@@ -44,8 +44,11 @@ tracking:
   achievements: true
 
 # Autosave interval (seconds)
+# How often changed stats are written to the database. Only players whose stats
+# actually changed are written, so a low interval is cheap. Minimum 5.
+# Stats are also flushed immediately when a player leaves and on shutdown.
 autosave:
-  interval-seconds: 120
+  interval-seconds: 30
 
 # Rate limiting
 rate-limit:

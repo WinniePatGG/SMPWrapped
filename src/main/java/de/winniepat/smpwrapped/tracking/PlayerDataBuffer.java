@@ -4,6 +4,7 @@ import de.winniepat.smpwrapped.log.LogContext;
 import de.winniepat.smpwrapped.log.SMPLogger;
 import de.winniepat.smpwrapped.model.PlayerStats;
 
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -58,6 +59,13 @@ public class PlayerDataBuffer {
     
     public boolean hasBuffer(UUID playerId) {
         return buffers.containsKey(playerId);
+    }
+
+    public Optional<PlayerStats> peekBuffer(UUID playerId) {
+        if (playerId == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(buffers.get(playerId));
     }
 
     public void removeBuffer(UUID playerId) {

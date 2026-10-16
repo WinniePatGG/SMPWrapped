@@ -11,7 +11,6 @@ public class PlayerStats {
     private long playtimeSeconds;
     private long blocksMined;
     private long blocksPlaced;
-    private long distanceTraveled; 
     private long mobsKilled;
     private long deaths;
     private long damageDealt;
@@ -21,6 +20,8 @@ public class PlayerStats {
     private long fishingCatches;
     private long loginSessions;
     private long uniqueDaysPlayed;
+
+    private double distanceTraveled;
 
     
     private final Map<String, Long> dimensionTime = new HashMap<>();
@@ -49,7 +50,7 @@ public class PlayerStats {
     public long getPlaytimeSeconds() { return playtimeSeconds; }
     public long getBlocksMined() { return blocksMined; }
     public long getBlocksPlaced() { return blocksPlaced; }
-    public long getDistanceTraveled() { return distanceTraveled; }
+    public long getDistanceTraveled() { return Math.round(distanceTraveled); }
     public long getMobsKilled() { return mobsKilled; }
     public long getDeaths() { return deaths; }
     public long getDamageDealt() { return damageDealt; }
@@ -70,7 +71,12 @@ public class PlayerStats {
     public void addPlaytime(long seconds) { this.playtimeSeconds += seconds; }
     public void addBlocksMined(long count) { this.blocksMined += count; }
     public void addBlocksPlaced(long count) { this.blocksPlaced += count; }
-    public void addDistance(long blocks) { this.distanceTraveled += blocks; }
+    public void addDistance(double blocks) {
+        if (!Double.isFinite(blocks) || blocks <= 0.0) {
+            return;
+        }
+        this.distanceTraveled += blocks;
+    }
     public void addMobsKilled(long count) { this.mobsKilled += count; }
     public void addDeath() { this.deaths++; }
     public void addDamageDealt(long amount) { this.damageDealt += amount; }

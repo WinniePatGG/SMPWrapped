@@ -59,7 +59,7 @@ public final class ConfigManager {
         cfg.addDefault("tracking.sessions", true);
         cfg.addDefault("tracking.achievements", true);
 
-        cfg.addDefault("autosave.interval-seconds", 120);
+        cfg.addDefault("autosave.interval-seconds", 30);
 
         cfg.addDefault("web.cache-seconds", 300);
 
@@ -116,9 +116,9 @@ public final class ConfigManager {
             errors.add("web.port must be between 1 and 65535");
         }
 
-        int autosave = cfg.getInt("autosave.interval-seconds", 120);
-        if (autosave < 10) {
-            errors.add("autosave.interval-seconds must be at least 10");
+        int autosave = cfg.getInt("autosave.interval-seconds", 30);
+        if (autosave < 5) {
+            errors.add("autosave.interval-seconds must be at least 5");
         }
 
         int cache = cfg.getInt("web.cache-seconds", 300);

@@ -152,13 +152,6 @@ public class WebServerManager {
         app.post("/api/v1/admin/rebuild/{playerId}/{seasonId}", this::handleAdminRebuildSnapshot);
 
         
-        app.get("/api/<path>", ctx -> {
-            LOG.debug("Rejected unknown API route", LogContext.of("path", ctx.path(), "ip", ctx.ip()));
-            ctx.json(Map.of("error", "Not found")).status(HttpStatus.NOT_FOUND);
-        });
-
-        
-        
         app.get("/", this::handleRoot);
 
         app.before(ctx -> applyRateLimit(ctx));
@@ -183,7 +176,9 @@ public class WebServerManager {
         app.error(404, ctx -> {
             LOG.debug("Request not found", LogContext.of(
                 "path", ctx.path(), "method", String.valueOf(ctx.method()), "ip", ctx.ip()));
-            ctx.json(Map.of("error", "Not found")).status(HttpStatus.NOT_FOUND);
+            if (hasNoBody(ctx)) {
+                ctx.json(Map.of("error", "Not found")).status(HttpStatus.NOT_FOUND);
+            }
         });
 
         app.error(500, ctx -> {
@@ -192,7 +187,9 @@ public class WebServerManager {
                 "method", String.valueOf(ctx.method()),
                 "ip", ctx.ip(),
                 "responseBody", ctx.result()));
-            ctx.json(Map.of("error", "Internal server error")).status(HttpStatus.INTERNAL_SERVER_ERROR);
+            if (hasNoBody(ctx)) {
+                ctx.json(Map.of("error", "Internal server error")).status(HttpStatus.INTERNAL_SERVER_ERROR);
+            }
         });
 
         app.exception(Exception.class, (exception, ctx) -> {
@@ -201,10 +198,13 @@ public class WebServerManager {
                 "method", String.valueOf(ctx.method()),
                 "ip", ctx.ip(),
                 "userAgent", ctx.userAgent()));
-            ctx.json(Map.of("error", "Internal server error")).status(HttpStatus.INTERNAL_SERVER_ERROR);
+            if (hasNoBody(ctx)) {
+                ctx.json(Map.of("error", "Internal server error")).status(HttpStatus.INTERNAL_SERVER_ERROR);
+            }
         });
 
         app.after(ctx -> {
+            enforceApiJsonResponse(ctx);
             Integer status = ctx.statusCode();
             int code = status == null ? 0 : status;
             Object[] context = LogContext.of(
@@ -220,6 +220,22 @@ public class WebServerManager {
                 LOG.trace("Request completed", context);
             }
         });
+    }
+
+    private void enforceApiJsonResponse(Context ctx) {
+        String path = ctx.path();
+        if (path == null || !path.startsWith("/api/")) {
+            return;
+        }
+        String body = ctx.result();
+        if (body == null || body.isEmpty()) {
+            return;
+        }
+        if (body.stripLeading().startsWith("<")) {
+            LOG.debug("Rewriting an unknown API route as a JSON 404",
+                LogContext.of("path", path, "ip", ctx.ip()));
+            ctx.json(Map.of("error", "Not found")).status(HttpStatus.NOT_FOUND);
+        }
     }
 
     
@@ -550,6 +566,11 @@ public class WebServerManager {
     }
 
     
+
+    private static boolean hasNoBody(Context ctx) {
+        String body = ctx.result();
+        return body == null || body.isBlank();
+    }
 
     private static boolean hasCause(Throwable throwable, Class<? extends Throwable> type) {
         Throwable current = throwable;
