@@ -18,7 +18,7 @@ Response:
 ```json
 {
   "status": "ok",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "timestamp": 1699999999999
 }
 ```

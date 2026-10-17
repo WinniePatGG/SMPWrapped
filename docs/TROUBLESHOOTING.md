@@ -11,28 +11,31 @@ see it, make sure you removed any `xyz.jpenilla.run-paper` plugin declaration fr
 
 ### `Unsupported class file major version` / wrong Java version
 
-SMPWrapped requires **Java 21**. Verify:
+SMPWrapped requires **Java 11 or newer**. Verify:
 
 ```bash
-java -version   # must report 21+
+java -version   # must report 11+
 ```
 
-If `java -version` reports an older version but Java 21 is installed, set `JAVA_HOME`
-to your JDK 21 install before building/running:
+If `java -version` reports an older version but Java 11 is installed, set `JAVA_HOME`
+to your JDK 11 install before building/running:
 
 ```powershell
 # Windows (PowerShell)
-$env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.11"
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-11.0.11"
 ```
 
 ```bash
 # Linux / macOS
-export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+export JAVA_HOME=$(/usr/libexec/java_home -v 11)
 ```
 
-The Gradle build uses a Java toolchain, so the plugin is always compiled for Java 21
-even if your default `java` is different — but the `runServer` task launches Paper with
-the resolved Java 21 toolchain.
+The Gradle build compiles with `--release 11`, so the JAR is always Java 11
+bytecode (class file major version 55) even if your default `java` is newer. The
+`runServer` task launches Paper with the resolved Java toolchain, which must be
+Java 21+ to run a modern Paper server.
+
+Java 8 will **not** work: a Java 11 class file cannot be loaded by a Java 8 JVM.
 
 ### Frontend not present in the JAR
 
@@ -48,7 +51,7 @@ npm run build
 then rebuild the plugin with `./gradlew shadowJar`. The `webapp` folder is packaged into
 the JAR automatically.
 
-### `Plugin JAR not found at build/libs/SMPWrapped-1.0.0.jar`
+### `Plugin JAR not found at build/libs/SMPWrapped-0.0.1.jar`
 
 `runServer` depends on `shadowJar`, but if the file was deleted manually, run
 `./gradlew shadowJar` first.

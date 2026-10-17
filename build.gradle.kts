@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "de.winniepat"
-version = "1.0.0"
+version = "0.0.1"
 description = "SMPWrapped - Minecraft SMP Wrapped Plugin + Web Dashboard"
 
 java {
@@ -102,6 +102,8 @@ tasks.processResources {
         "version" to version,
         "description" to project.description
     )
+    inputs.property("expandVersion", version)
+    inputs.property("expandDescription", project.description)
     filesMatching("plugin.yml") {
         expand(props)
     }
