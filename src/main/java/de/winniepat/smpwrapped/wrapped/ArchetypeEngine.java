@@ -79,16 +79,56 @@ public final class ArchetypeEngine {
     }
 
     private static String getDescription(String archetype) {
-        return switch (archetype) {
-            case "The Miner" -> "Driven by the call of the deep. Every ore vein is a treasure waiting to be uncovered.";
-            case "The Explorer" -> "No cave is too dark, no mountain too high. The world is theirs to discover.";
-            case "The Builder" -> "Turning imagination into reality, one block at a time. A true architect of the world.";
-            case "The Monster Hunter" -> "Fearless in the face of danger. No mob is safe from their blade.";
-            case "The Survivor" -> "Against all odds, they persist. Death is just a minor inconvenience.";
-            case "The Collector" -> "Every item has a place, and they'll find it. A master of organization and gathering.";
-            default -> "A unique player with their own story to tell.";
-        };
+        if (archetype == null) {
+            return "A unique player with their own story to tell.";
+        }
+        switch (archetype) {
+            case "The Miner":
+                return "Driven by the call of the deep. Every ore vein is a treasure waiting to be uncovered.";
+            case "The Explorer":
+                return "No cave is too dark, no mountain too high. The world is theirs to discover.";
+            case "The Builder":
+                return "Turning imagination into reality, one block at a time. A true architect of the world.";
+            case "The Monster Hunter":
+                return "Fearless in the face of danger. No mob is safe from their blade.";
+            case "The Survivor":
+                return "Against all odds, they persist. Death is just a minor inconvenience.";
+            case "The Collector":
+                return "Every item has a place, and they'll find it. A master of organization and gathering.";
+            default:
+                return "A unique player with their own story to tell.";
+        }
     }
 
-    public record ArchetypeResult(String name, String description) {}
+    public static final class ArchetypeResult {
+        private final String name;
+        private final String description;
+
+        public ArchetypeResult(String name, String description) {
+            this.name = name;
+            this.description = description;
+        }
+
+        public String name() { return name; }
+        public String description() { return description; }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) return true;
+            if (!(other instanceof ArchetypeResult)) return false;
+            ArchetypeResult that = (ArchetypeResult) other;
+            return java.util.Objects.equals(name, that.name)
+                && java.util.Objects.equals(description, that.description);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(name, description);
+        }
+
+        @Override
+        public String toString() {
+            return "ArchetypeResult[name=" + name + ", description=" + description + "]";
+        }
+    }
 }

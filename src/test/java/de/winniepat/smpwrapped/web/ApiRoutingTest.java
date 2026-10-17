@@ -239,7 +239,22 @@ class ApiRoutingTest {
         assertThat(response.body()).startsWith("{");
     }
 
-    private record Response(int status, String body) {
+    private static final class Response {
+        private final int status;
+        private final String body;
+
+        private Response(int status, String body) {
+            this.status = status;
+            this.body = body;
+        }
+
+        int status() {
+            return status;
+        }
+
+        String body() {
+            return body;
+        }
     }
 
     private Response get(String path) {

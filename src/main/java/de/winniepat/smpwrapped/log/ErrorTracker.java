@@ -19,7 +19,18 @@ final class ErrorTracker {
         private int suppressed;
     }
 
-    record Decision(boolean shouldLog, int suppressedRepeats) {
+    static final class Decision {
+        private final boolean shouldLog;
+        private final int suppressedRepeats;
+
+        private Decision(boolean shouldLog, int suppressedRepeats) {
+            this.shouldLog = shouldLog;
+            this.suppressedRepeats = suppressedRepeats;
+        }
+
+        boolean shouldLog() { return shouldLog; }
+        int suppressedRepeats() { return suppressedRepeats; }
+
         static Decision log() {
             return new Decision(true, 0);
         }

@@ -102,7 +102,10 @@ public class WebServerManager {
                     "host", config.webHost(), "port", config.webPort()));
             }
             app = null;
-            throw t instanceof RuntimeException runtime ? runtime : new IllegalStateException(t);
+            if (t instanceof RuntimeException) {
+                throw (RuntimeException) t;
+            }
+            throw new IllegalStateException(t);
         } finally {
             Thread.currentThread().setContextClassLoader(previousTccl);
         }

@@ -340,7 +340,10 @@ public final class ConfigManager {
             LOG.info("Configuration reloaded");
         } catch (Throwable t) {
             LOG.error("Configuration reload failed", t);
-            throw t instanceof RuntimeException runtime ? runtime : new IllegalStateException(t);
+            if (t instanceof RuntimeException) {
+                throw (RuntimeException) t;
+            }
+            throw new IllegalStateException(t);
         }
     }
 

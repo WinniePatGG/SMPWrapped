@@ -117,83 +117,70 @@ public class DatabaseManager {
         return throwable;
     }
 
+    private static final String[] MIGRATIONS = {
+        "CREATE TABLE IF NOT EXISTS players ("
+            + " uuid TEXT PRIMARY KEY,"
+            + " last_name TEXT NOT NULL,"
+            + " first_seen INTEGER NOT NULL,"
+            + " last_seen INTEGER NOT NULL,"
+            + " opted_out INTEGER NOT NULL DEFAULT 0"
+            + ")",
+
+        "CREATE TABLE IF NOT EXISTS seasons ("
+            + " id TEXT PRIMARY KEY,"
+            + " name TEXT NOT NULL,"
+            + " start_time INTEGER NOT NULL,"
+            + " end_time INTEGER NOT NULL DEFAULT -1,"
+            + " state TEXT NOT NULL DEFAULT 'DRAFT'"
+            + ")",
+
+        "CREATE TABLE IF NOT EXISTS player_season_stats ("
+            + " player_uuid TEXT NOT NULL,"
+            + " season_id TEXT NOT NULL,"
+            + " stat_key TEXT NOT NULL,"
+            + " stat_value TEXT NOT NULL,"
+            + " stat_type TEXT NOT NULL DEFAULT 'long',"
+            + " PRIMARY KEY (player_uuid, season_id, stat_key)"
+            + ")",
+
+        "CREATE TABLE IF NOT EXISTS sessions ("
+            + " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            + " player_uuid TEXT NOT NULL,"
+            + " login_time INTEGER NOT NULL,"
+            + " logout_time INTEGER NOT NULL DEFAULT -1,"
+            + " dimension TEXT"
+            + ")",
+
+        "CREATE TABLE IF NOT EXISTS wrapped_snapshots ("
+            + " player_uuid TEXT NOT NULL,"
+            + " season_id TEXT NOT NULL,"
+            + " generated_at INTEGER NOT NULL,"
+            + " snapshot_json TEXT NOT NULL,"
+            + " PRIMARY KEY (player_uuid, season_id)"
+            + ")",
+
+        "CREATE TABLE IF NOT EXISTS achievements ("
+            + " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            + " player_uuid TEXT NOT NULL,"
+            + " season_id TEXT NOT NULL,"
+            + " achievement_key TEXT NOT NULL,"
+            + " achieved_at INTEGER NOT NULL,"
+            + " UNIQUE(player_uuid, season_id, achievement_key)"
+            + ")",
+
+        "CREATE INDEX IF NOT EXISTS idx_stats_season ON player_season_stats(season_id)",
+        "CREATE INDEX IF NOT EXISTS idx_stats_player ON player_season_stats(player_uuid)",
+        "CREATE INDEX IF NOT EXISTS idx_sessions_player ON sessions(player_uuid)",
+        "CREATE INDEX IF NOT EXISTS idx_achievements_player ON achievements(player_uuid, season_id)"
+    };
+
     private void runMigrations() {
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement()) {
 
-            
-            stmt.execute("""
-                CREATE TABLE IF NOT EXISTS players (
-                    uuid TEXT PRIMARY KEY,
-                    last_name TEXT NOT NULL,
-                    first_seen INTEGER NOT NULL,
-                    last_seen INTEGER NOT NULL,
-                    opted_out INTEGER NOT NULL DEFAULT 0
-                )
-            """);
-
-            
-            stmt.execute("""
-                CREATE TABLE IF NOT EXISTS seasons (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    start_time INTEGER NOT NULL,
-                    end_time INTEGER NOT NULL DEFAULT -1,
-                    state TEXT NOT NULL DEFAULT 'DRAFT'
-                )
-            """);
-
-            
-            stmt.execute("""
-                CREATE TABLE IF NOT EXISTS player_season_stats (
-                    player_uuid TEXT NOT NULL,
-                    season_id TEXT NOT NULL,
-                    stat_key TEXT NOT NULL,
-                    stat_value TEXT NOT NULL,
-                    stat_type TEXT NOT NULL DEFAULT 'long',
-                    PRIMARY KEY (player_uuid, season_id, stat_key)
-                )
-            """);
-
-            
-            stmt.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    player_uuid TEXT NOT NULL,
-                    login_time INTEGER NOT NULL,
-                    logout_time INTEGER NOT NULL DEFAULT -1,
-                    dimension TEXT
-                )
-            """);
-
-            
-            stmt.execute("""
-                CREATE TABLE IF NOT EXISTS wrapped_snapshots (
-                    player_uuid TEXT NOT NULL,
-                    season_id TEXT NOT NULL,
-                    generated_at INTEGER NOT NULL,
-                    snapshot_json TEXT NOT NULL,
-                    PRIMARY KEY (player_uuid, season_id)
-                )
-            """);
-
-            
-            stmt.execute("""
-                CREATE TABLE IF NOT EXISTS achievements (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    player_uuid TEXT NOT NULL,
-                    season_id TEXT NOT NULL,
-                    achievement_key TEXT NOT NULL,
-                    achieved_at INTEGER NOT NULL,
-                    UNIQUE(player_uuid, season_id, achievement_key)
-                )
-            """);
-
-            
-            stmt.execute("CREATE INDEX IF NOT EXISTS idx_stats_season ON player_season_stats(season_id)");
-            stmt.execute("CREATE INDEX IF NOT EXISTS idx_stats_player ON player_season_stats(player_uuid)");
-            stmt.execute("CREATE INDEX IF NOT EXISTS idx_sessions_player ON sessions(player_uuid)");
-            stmt.execute("CREATE INDEX IF NOT EXISTS idx_achievements_player ON achievements(player_uuid, season_id)");
+            for (String migration : MIGRATIONS) {
+                stmt.execute(migration);
+            }
 
             try {
                 stmt.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_seasons_single_active ON seasons(state) WHERE state = 'ACTIVE'");
@@ -202,7 +189,8 @@ public class DatabaseManager {
                     LogContext.of("hint", "End or unpublish every extra ACTIVE season, then restart the server"));
             }
 
-            LOG.info("Database initialized and migrations applied", LogContext.of("tables", 6, "indexes", 5));
+            LOG.info("Database initialized and migrations applied", LogContext.of(
+                "tables", 6, "indexes", 5, "statements", MIGRATIONS.length));
 
         } catch (SQLException e) {
             LOG.fatal("Failed to apply database migrations", e);
@@ -571,22 +559,52 @@ public class DatabaseManager {
     }
 
     private void applyStat(PlayerStats stats, String key, long value) {
+        if (key == null) {
+            return;
+        }
         switch (key) {
-            case "playtime_seconds" -> stats.addPlaytime(value);
-            case "blocks_mined" -> stats.addBlocksMined(value);
-            case "blocks_placed" -> stats.addBlocksPlaced(value);
-            case "distance_traveled" -> stats.addDistance(value);
-            case "mobs_killed" -> stats.addMobsKilled(value);
-            case "deaths" -> repeat(key, value, stats::addDeath);
-            case "damage_dealt" -> stats.addDamageDealt(value);
-            case "damage_received" -> stats.addDamageReceived(value);
-            case "items_crafted" -> stats.addItemsCrafted(value);
-            case "items_collected" -> stats.addItemsCollected(value);
-            case "fishing_catches" -> repeat(key, value, stats::addFishingCatch);
-            case "login_sessions" -> repeat(key, value, stats::addLoginSession);
-            case "unique_days" -> repeat(key, value, stats::addUniqueDay);
-            default -> LOG.trace("Ignoring unknown scalar stat key",
-                LogContext.of("statKey", key, "value", value));
+            case "playtime_seconds":
+                stats.addPlaytime(value);
+                break;
+            case "blocks_mined":
+                stats.addBlocksMined(value);
+                break;
+            case "blocks_placed":
+                stats.addBlocksPlaced(value);
+                break;
+            case "distance_traveled":
+                stats.addDistance(value);
+                break;
+            case "mobs_killed":
+                stats.addMobsKilled(value);
+                break;
+            case "deaths":
+                repeat(key, value, stats::addDeath);
+                break;
+            case "damage_dealt":
+                stats.addDamageDealt(value);
+                break;
+            case "damage_received":
+                stats.addDamageReceived(value);
+                break;
+            case "items_crafted":
+                stats.addItemsCrafted(value);
+                break;
+            case "items_collected":
+                stats.addItemsCollected(value);
+                break;
+            case "fishing_catches":
+                repeat(key, value, stats::addFishingCatch);
+                break;
+            case "login_sessions":
+                repeat(key, value, stats::addLoginSession);
+                break;
+            case "unique_days":
+                repeat(key, value, stats::addUniqueDay);
+                break;
+            default:
+                LOG.trace("Ignoring unknown scalar stat key",
+                    LogContext.of("statKey", key, "value", value));
         }
     }
 
@@ -607,21 +625,37 @@ public class DatabaseManager {
 
     private void applyMapStat(PlayerStats stats, String key, String json) {
         Map<String, Long> map = parseJsonMap(json);
+        if (key == null) {
+            return;
+        }
         switch (key) {
-            case "dimension_time" -> map.forEach(stats::addDimensionTime);
-            case "blocks_mined_by_type" -> map.forEach(stats::addBlockMined);
-            case "blocks_placed_by_type" -> map.forEach(stats::addBlockPlaced);
-            case "mobs_killed_by_type" -> map.forEach(stats::addMobKilled);
-            case "daily_playtime" -> map.forEach(stats::addDailyPlaytime);
-            case "hourly_playtime" -> map.forEach((hour, seconds) -> {
-                try {
-                    stats.addHourlyPlaytime(Integer.parseInt(hour), seconds);
-                } catch (NumberFormatException e) {
-                    LOG.warn("Ignoring hourly playtime entry with a non-numeric hour",
-                        LogContext.of("hour", hour, "seconds", seconds));
-                }
-            });
-            default -> LOG.trace("Ignoring unknown map stat key", LogContext.of("statKey", key));
+            case "dimension_time":
+                map.forEach(stats::addDimensionTime);
+                break;
+            case "blocks_mined_by_type":
+                map.forEach(stats::addBlockMined);
+                break;
+            case "blocks_placed_by_type":
+                map.forEach(stats::addBlockPlaced);
+                break;
+            case "mobs_killed_by_type":
+                map.forEach(stats::addMobKilled);
+                break;
+            case "daily_playtime":
+                map.forEach(stats::addDailyPlaytime);
+                break;
+            case "hourly_playtime":
+                map.forEach((hour, seconds) -> {
+                    try {
+                        stats.addHourlyPlaytime(Integer.parseInt(hour), seconds);
+                    } catch (NumberFormatException e) {
+                        LOG.warn("Ignoring hourly playtime entry with a non-numeric hour",
+                            LogContext.of("hour", hour, "seconds", seconds));
+                    }
+                });
+                break;
+            default:
+                LOG.trace("Ignoring unknown map stat key", LogContext.of("statKey", key));
         }
     }
 
@@ -889,7 +923,8 @@ public class DatabaseManager {
     }
 
     private UUID readUuid(Object raw, UUID fallback, String field) {
-        if (raw instanceof String text && !text.isBlank()) {
+        if (raw instanceof String && !((String) raw).isBlank()) {
+            String text = (String) raw;
             try {
                 return UUID.fromString(text);
             } catch (IllegalArgumentException e) {
@@ -901,11 +936,11 @@ public class DatabaseManager {
     }
 
     private String readString(Object raw, String fallback, String field) {
-        return (raw instanceof String text) ? text : fallback;
+        return (raw instanceof String) ? (String) raw : fallback;
     }
 
     private long readLong(Object raw, long fallback, String field) {
-        return (raw instanceof Number number) ? number.longValue() : fallback;
+        return (raw instanceof Number) ? ((Number) raw).longValue() : fallback;
     }
 
     private Map<String, Object> parseJsonObject(String json) {

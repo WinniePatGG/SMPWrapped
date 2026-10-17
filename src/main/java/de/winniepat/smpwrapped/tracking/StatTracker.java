@@ -298,12 +298,14 @@ public class StatTracker implements Listener {
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         if (!plugin.getConfigManager().get().trackDamage()) return;
 
-        if (event.getDamager() instanceof Player player) {
+        if (event.getDamager() instanceof Player) {
+            Player player = (Player) event.getDamager();
             PlayerStats stats = markDirty(player.getUniqueId());
             stats.addDamageDealt((long) event.getDamage());
         }
 
-        if (event.getEntity() instanceof Player player) {
+        if (event.getEntity() instanceof Player) {
+            Player player = (Player) event.getEntity();
             PlayerStats stats = markDirty(player.getUniqueId());
             stats.addDamageReceived((long) event.getDamage());
         }
@@ -314,7 +316,8 @@ public class StatTracker implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onCraftItem(CraftItemEvent event) {
         if (!plugin.getConfigManager().get().trackCrafting()) return;
-        if (!(event.getWhoClicked() instanceof Player player)) return;
+        if (!(event.getWhoClicked() instanceof Player)) return;
+        Player player = (Player) event.getWhoClicked();
 
         ItemStack result = event.getRecipe().getResult();
         int amount = result.getAmount();
@@ -339,7 +342,8 @@ public class StatTracker implements Listener {
     public void onFish(PlayerFishEvent event) {
         if (!plugin.getConfigManager().get().trackFishing()) return;
         if (event.getState() != PlayerFishEvent.State.CAUGHT_FISH) return;
-        if (!(event.getPlayer() instanceof Player player)) return;
+        if (!(event.getPlayer() instanceof Player)) return;
+        Player player = (Player) event.getPlayer();
 
         PlayerStats stats = markDirty(player.getUniqueId());
         stats.addFishingCatch();

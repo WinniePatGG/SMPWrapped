@@ -146,7 +146,7 @@ public class WrappedGenerator {
 
     private static boolean matches(Map<String, Object> map, String key, long expected) {
         Object raw = map.get(key);
-        return raw instanceof Number number && number.longValue() == expected;
+        return raw instanceof Number && ((Number) raw).longValue() == expected;
     }
 
     private List<String> generateMilestones(PlayerStats stats) {

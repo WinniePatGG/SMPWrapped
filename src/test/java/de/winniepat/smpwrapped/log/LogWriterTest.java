@@ -69,7 +69,8 @@ class LogWriterTest {
 
         List<Path> archives;
         try (var stream = Files.list(tempDir)) {
-            archives = stream.filter(p -> p.getFileName().toString().endsWith(".gz")).toList();
+            archives = stream.filter(p -> p.getFileName().toString().endsWith(".gz"))
+                .collect(java.util.stream.Collectors.toList());
         }
         assertThat(archives).isNotEmpty();
         assertThat(archives).allSatisfy(p ->

@@ -111,7 +111,7 @@ class SnapshotFreshnessTest {
             PlayerStats after = new PlayerStats(PLAYER_ID, SEASON_ID);
             mutate.run();
             assertThat(WrappedGenerator.isSnapshotCurrent(snapshotOf(fullStats(after)), after))
-                .as("mutator %s", mutate.getClass().getName())
+                .as("mutator should produce a current snapshot")
                 .isTrue();
         }
     }
@@ -135,7 +135,7 @@ class SnapshotFreshnessTest {
         stats.addPlaytime(120);
 
         Map<String, Object> asDoubles = new LinkedHashMap<>(fullStats(stats));
-        asDoubles.replaceAll((key, value) -> value instanceof Long l ? l.doubleValue() : value);
+        asDoubles.replaceAll((key, value) -> value instanceof Long ? ((Long) value).doubleValue() : value);
 
         assertThat(WrappedGenerator.isSnapshotCurrent(snapshotOf(asDoubles), stats)).isTrue();
     }

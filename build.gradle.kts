@@ -14,14 +14,21 @@ java {
     toolchain.languageVersion = JavaLanguageVersion.of(21)
 }
 
+tasks.withType<JavaCompile>().configureEach {
+    options.release.set(11)
+    options.encoding = "UTF-8"
+}
+
 repositories {
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/")
+    maven("https://hub.spigotmc.org/nexus/content/repositories/snapshots/")
 }
 
 dependencies {
-    // Paper API
-    compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
+    // Bukkit/Spigot API 1.16.3 (oldest supported). The Bukkit API is largely
+    // additive, so this single jar also runs on every server up to 26.3.
+    compileOnly("org.spigotmc:spigot-api:1.16.3-R0.1-SNAPSHOT")
 
     // Javalin web server
     implementation("io.javalin:javalin:6.4.0")
@@ -45,7 +52,7 @@ dependencies {
 
 
     // Testing
-    testImplementation("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
+    testImplementation("org.spigotmc:spigot-api:1.16.3-R0.1-SNAPSHOT")
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testImplementation("org.junit.platform:junit-platform-launcher:1.11.4")
     testImplementation("org.mockito:mockito-core:5.15.2")

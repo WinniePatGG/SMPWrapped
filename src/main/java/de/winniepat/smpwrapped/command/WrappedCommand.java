@@ -4,12 +4,11 @@ import de.winniepat.smpwrapped.SMPWrapped;
 import de.winniepat.smpwrapped.log.LogContext;
 import de.winniepat.smpwrapped.log.SMPLogger;
 import de.winniepat.smpwrapped.model.*;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.event.ClickEvent;
+import de.winniepat.smpwrapped.util.Chat;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
 
+import java.io.File;
 import java.util.*;
 
 
@@ -35,221 +34,236 @@ public class WrappedCommand implements CommandExecutor, TabCompleter {
                 return true;
             }
 
-            switch (args[0].toLowerCase()) {
-                case "stats" -> handleStats(sender);
-                case "top" -> handleTop(sender);
-                case "help" -> handleHelp(sender);
-                case "reload" -> handleReload(sender);
-                case "admin" -> handleAdmin(sender, args);
-                default -> sender.sendMessage(Component.text("Unknown subcommand. Use /wrapped help for help.", NamedTextColor.RED));
+            String sub = args[0].toLowerCase();
+            if (sub.equals("stats")) {
+                handleStats(sender);
+            } else if (sub.equals("top")) {
+                handleTop(sender);
+            } else if (sub.equals("help")) {
+                handleHelp(sender);
+            } else if (sub.equals("reload")) {
+                handleReload(sender);
+            } else if (sub.equals("admin")) {
+                handleAdmin(sender, args);
+            } else {
+                sender.sendMessage(Chat.of(Chat.RED, "Unknown subcommand. Use /wrapped help for help."));
             }
         } catch (Throwable t) {
             LOG.error("Command handler failed", t, LogContext.of(
                 "sender", sender.getName(),
                 "label", label,
                 "args", String.join(" ", args)));
-            sender.sendMessage(Component.text("Something went wrong while running that command. Check the server log.", NamedTextColor.RED));
+            sender.sendMessage(Chat.of(Chat.RED, "Something went wrong while running that command. Check the server log."));
         }
         return true;
     }
 
     private void sendWrappedLink(CommandSender sender) {
-        if (!(sender instanceof Player player)) {
-            sender.sendMessage(Component.text("Only players can use this command.", NamedTextColor.RED));
+        if (!(sender instanceof Player)) {
+            sender.sendMessage(Chat.of(Chat.RED, "Only players can use this command."));
             return;
         }
+        Player player = (Player) sender;
 
         String baseUrl = plugin.getConfigManager().get().publicBaseUrl();
         String url = baseUrl + "/w/" + player.getName();
 
-        player.sendMessage(Component.text("Click here to open your Wrapped!", NamedTextColor.GREEN)
-            .clickEvent(ClickEvent.openUrl(url)));
+        sender.sendMessage(Chat.of(Chat.GREEN, "Click here to open your Wrapped!"));
+        sender.sendMessage(Chat.link("", url));
     }
 
     private void handleStats(CommandSender sender) {
-        if (!(sender instanceof Player player)) {
-            sender.sendMessage(Component.text("Only players can use this command.", NamedTextColor.RED));
+        if (!(sender instanceof Player)) {
+            sender.sendMessage(Chat.of(Chat.RED, "Only players can use this command."));
             return;
         }
+        Player player = (Player) sender;
 
         String seasonId = plugin.getConfigManager().get().currentSeasonId();
         PlayerStats stats = plugin.getDatabase().loadPlayerStats(player.getUniqueId(), seasonId);
 
-        sender.sendMessage(Component.text("=== Your Stats ===", NamedTextColor.GOLD));
-        sender.sendMessage(Component.text("Playtime: " + formatDuration(stats.getPlaytimeSeconds()), NamedTextColor.YELLOW));
-        sender.sendMessage(Component.text("Blocks Mined: " + stats.getBlocksMined(), NamedTextColor.YELLOW));
-        sender.sendMessage(Component.text("Blocks Placed: " + stats.getBlocksPlaced(), NamedTextColor.YELLOW));
-        sender.sendMessage(Component.text("Distance Traveled: " + stats.getDistanceTraveled() + " blocks", NamedTextColor.YELLOW));
-        sender.sendMessage(Component.text("Mobs Killed: " + stats.getMobsKilled(), NamedTextColor.YELLOW));
-        sender.sendMessage(Component.text("Deaths: " + stats.getDeaths(), NamedTextColor.YELLOW));
+        sender.sendMessage(Chat.title("=== Your Stats ==="));
+        sender.sendMessage(Chat.line(Chat.YELLOW, "Playtime", formatDuration(stats.getPlaytimeSeconds())));
+        sender.sendMessage(Chat.line(Chat.YELLOW, "Blocks Mined", String.valueOf(stats.getBlocksMined())));
+        sender.sendMessage(Chat.line(Chat.YELLOW, "Blocks Placed", String.valueOf(stats.getBlocksPlaced())));
+        sender.sendMessage(Chat.line(Chat.YELLOW, "Distance Traveled", stats.getDistanceTraveled() + " blocks"));
+        sender.sendMessage(Chat.line(Chat.YELLOW, "Mobs Killed", String.valueOf(stats.getMobsKilled())));
+        sender.sendMessage(Chat.line(Chat.YELLOW, "Deaths", String.valueOf(stats.getDeaths())));
     }
 
     private void handleTop(CommandSender sender) {
         String seasonId = plugin.getConfigManager().get().currentSeasonId();
         List<Map.Entry<UUID, Long>> top = plugin.getDatabase().getLeaderboard(seasonId, "playtime_seconds", 5);
 
-        sender.sendMessage(Component.text("=== Top Players (Playtime) ===", NamedTextColor.GOLD));
+        sender.sendMessage(Chat.title("=== Top Players (Playtime) ==="));
         int[] rank = {1};
         for (Map.Entry<UUID, Long> entry : top) {
-            plugin.getDatabase().getPlayer(entry.getKey()).ifPresent(p -> {
-                sender.sendMessage(Component.text(rank[0] + ". " + p.lastName() + " - " + formatDuration(entry.getValue()), NamedTextColor.YELLOW));
-            });
+            final int place = rank[0];
+            plugin.getDatabase().getPlayer(entry.getKey()).ifPresent(p ->
+                sender.sendMessage(Chat.line(Chat.YELLOW, place + ". " + p.lastName(), formatDuration(entry.getValue()))));
             rank[0]++;
         }
     }
 
     private void handleHelp(CommandSender sender) {
-        sender.sendMessage(Component.text("=== SMPWrapped Commands ===", NamedTextColor.GOLD));
-        sender.sendMessage(Component.text("/wrapped - Open your Wrapped page", NamedTextColor.YELLOW));
-        sender.sendMessage(Component.text("/wrapped stats - View your stats", NamedTextColor.YELLOW));
-        sender.sendMessage(Component.text("/wrapped top - View top players", NamedTextColor.YELLOW));
-        sender.sendMessage(Component.text("/wrapped reload - Reload configuration", NamedTextColor.YELLOW));
+        sender.sendMessage(Chat.title("=== SMPWrapped Commands ==="));
+        sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped", "Open your Wrapped page"));
+        sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped stats", "View your stats"));
+        sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped top", "View top players"));
+        sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped reload", "Reload configuration"));
         if (sender.hasPermission("smpwrapped.admin")) {
-            sender.sendMessage(Component.text("=== Admin Commands ===", NamedTextColor.GOLD));
-            sender.sendMessage(Component.text("/wrapped admin create <name> - Create and activate a season", NamedTextColor.YELLOW));
-            sender.sendMessage(Component.text("/wrapped admin seasons - List all seasons", NamedTextColor.YELLOW));
-            sender.sendMessage(Component.text("/wrapped admin switch <season> - Record stats into another season", NamedTextColor.YELLOW));
-            sender.sendMessage(Component.text("/wrapped admin end <season> - End a season", NamedTextColor.YELLOW));
-            sender.sendMessage(Component.text("/wrapped admin publish <season> - Publish (archive) a season", NamedTextColor.YELLOW));
-            sender.sendMessage(Component.text("/wrapped admin unpublish <season> - Bring a season back to ENDED", NamedTextColor.YELLOW));
-            sender.sendMessage(Component.text("/wrapped admin stats <player> - Show a player's stats", NamedTextColor.YELLOW));
-            sender.sendMessage(Component.text("/wrapped admin backup - Create database backup", NamedTextColor.YELLOW));
+            sender.sendMessage(Chat.title("=== Admin Commands ==="));
+            sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped admin create <name>", "Create and activate a season"));
+            sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped admin seasons", "List all seasons"));
+            sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped admin switch <season>", "Record stats into another season"));
+            sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped admin end <season>", "End a season"));
+            sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped admin publish <season>", "Publish (archive) a season"));
+            sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped admin unpublish <season>", "Bring a season back to ENDED"));
+            sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped admin stats <player>", "Show a player's stats"));
+            sender.sendMessage(Chat.line(Chat.YELLOW, "/wrapped admin backup", "Create database backup"));
         }
     }
 
     private void handleReload(CommandSender sender) {
         if (!sender.hasPermission("smpwrapped.admin")) {
-            sender.sendMessage(Component.text("You don't have permission to use this command.", NamedTextColor.RED));
+            sender.sendMessage(Chat.of(Chat.RED, "You don't have permission to use this command."));
             return;
         }
         try {
             plugin.getConfigManager().reload();
             plugin.getStatTracker().flushAll();
-            sender.sendMessage(Component.text("Configuration reloaded and stats flushed.", NamedTextColor.GREEN));
+            sender.sendMessage(Chat.of(Chat.GREEN, "Configuration reloaded and stats flushed."));
             LOG.info("Configuration reloaded from chat", LogContext.of("sender", sender.getName()));
         } catch (Throwable t) {
             LOG.error("Reload failed", t, LogContext.of("sender", sender.getName()));
-            sender.sendMessage(Component.text("Reload failed, check the server log for details.", NamedTextColor.RED));
+            sender.sendMessage(Chat.of(Chat.RED, "Reload failed, check the server log for details."));
         }
     }
 
     private void handleAdmin(CommandSender sender, String[] args) {
         if (!sender.hasPermission("smpwrapped.admin")) {
-            sender.sendMessage(Component.text("You don't have permission to use this command.", NamedTextColor.RED));
+            sender.sendMessage(Chat.of(Chat.RED, "You don't have permission to use this command."));
             return;
         }
 
         if (args.length < 2) {
-            sender.sendMessage(Component.text("Usage: /wrapped admin <create|end|publish|stats|backup>", NamedTextColor.RED));
+            sender.sendMessage(Chat.of(Chat.RED, "Usage: /wrapped admin <create|seasons|switch|end|publish|unpublish|stats|backup>"));
             return;
         }
 
-        switch (args[1].toLowerCase()) {
-            case "create" -> {
-                if (args.length < 3) {
-                    sender.sendMessage(Component.text("Usage: /wrapped admin create <name>", NamedTextColor.RED));
-                    return;
-                }
-                String name = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
-                String id = name.toLowerCase().replaceAll("[^a-z0-9]+", "-");
-                try {
-                    Season season = plugin.getSeasonManager().createSeason(id, name);
-                    if (season == null) {
-                        sender.sendMessage(Component.text("Could not create the season.", NamedTextColor.RED));
-                        return;
-                    }
-                    sender.sendMessage(Component.text("Created and activated season: " + name + " (" + id + ")", NamedTextColor.GREEN));
-                    sender.sendMessage(Component.text("Stats are now recorded into " + id + ".", NamedTextColor.YELLOW));
-                } catch (RuntimeException e) {
-                    LOG.error("Could not create a season", e, LogContext.of(
-                        "sender", sender.getName(), "season", id, "name", name));
-                    sender.sendMessage(Component.text("Could not create the season. Check the server log.", NamedTextColor.RED));
-                }
+        String sub = args[1].toLowerCase();
+        if (sub.equals("create")) {
+            handleAdminCreate(sender, args);
+        } else if (sub.equals("end")) {
+            handleAdminSeasonAction(sender, args, "end", "Ended season");
+        } else if (sub.equals("publish")) {
+            handleAdminSeasonAction(sender, args, "publish", "Published season");
+        } else if (sub.equals("unpublish")) {
+            handleAdminSeasonAction(sender, args, "unpublish", "Unpublished season");
+        } else if (sub.equals("switch")) {
+            handleAdminSwitch(sender, args);
+        } else if (sub.equals("seasons")) {
+            handleAdminSeasons(sender);
+        } else if (sub.equals("stats")) {
+            handleAdminStats(sender, args);
+        } else if (sub.equals("backup")) {
+            handleAdminBackup(sender);
+        } else {
+            sender.sendMessage(Chat.of(Chat.RED, "Unknown admin subcommand."));
+        }
+    }
+
+    private void handleAdminCreate(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage(Chat.of(Chat.RED, "Usage: /wrapped admin create <name>"));
+            return;
+        }
+        String name = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
+        String id = name.toLowerCase().replaceAll("[^a-z0-9]+", "-");
+        try {
+            Season season = plugin.getSeasonManager().createSeason(id, name);
+            if (season == null) {
+                sender.sendMessage(Chat.of(Chat.RED, "Could not create the season."));
+                return;
             }
-            case "end" -> {
-                if (args.length < 3) {
-                    sender.sendMessage(Component.text("Usage: /wrapped admin end <season>", NamedTextColor.RED));
-                    return;
-                }
-                String seasonId = args[2];
-                if (plugin.getSeasonManager().endSeason(seasonId)) {
-                    sender.sendMessage(Component.text("Ended season: " + seasonId, NamedTextColor.GREEN));
-                } else {
-                    sender.sendMessage(Component.text("Failed to end season.", NamedTextColor.RED));
-                }
-            }
-            case "publish" -> {
-                if (args.length < 3) {
-                    sender.sendMessage(Component.text("Usage: /wrapped admin publish <season>", NamedTextColor.RED));
-                    return;
-                }
-                String seasonId = args[2];
-                if (plugin.getSeasonManager().publishSeason(seasonId)) {
-                    sender.sendMessage(Component.text("Published season: " + seasonId, NamedTextColor.GREEN));
-                } else {
-                    sender.sendMessage(Component.text("Failed to publish season.", NamedTextColor.RED));
-                }
-            }
-            case "unpublish" -> {
-                if (args.length < 3) {
-                    sender.sendMessage(Component.text("Usage: /wrapped admin unpublish <season>", NamedTextColor.RED));
-                    return;
-                }
-                String seasonId = args[2];
-                if (plugin.getSeasonManager().unpublishSeason(seasonId)) {
-                    sender.sendMessage(Component.text("Unpublished season: " + seasonId, NamedTextColor.GREEN));
-                } else {
-                    sender.sendMessage(Component.text("Failed to unpublish season.", NamedTextColor.RED));
-                }
-            }
-            case "switch" -> {
-                if (args.length < 3) {
-                    sender.sendMessage(Component.text("Usage: /wrapped admin switch <season>", NamedTextColor.RED));
-                    return;
-                }
-                String seasonId = args[2];
-                if (plugin.getSeasonManager().switchSeason(seasonId)) {
-                    sender.sendMessage(Component.text("Now recording into season: " + seasonId, NamedTextColor.GREEN));
-                } else {
-                    sender.sendMessage(Component.text("Failed to switch season. Check the server log.", NamedTextColor.RED));
-                }
-            }
-            case "seasons" -> {
-                sender.sendMessage(Component.text("=== Seasons ===", NamedTextColor.GOLD));
-                String current = plugin.getSeasonManager().currentSeasonId();
-                for (Season season : plugin.getSeasonManager().getAllSeasons()) {
-                    sender.sendMessage(Component.text(
-                        (season.id().equals(current) ? "* " : "  ") + season.id() + " [" + season.state() + "] " + season.name(),
-                        season.isActive() ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
-                }
-            }
-            case "stats" -> {
-                if (args.length < 3) {
-                    sender.sendMessage(Component.text("Usage: /wrapped admin stats <player>", NamedTextColor.RED));
-                    return;
-                }
-                String playerName = args[2];
-                
-                plugin.getDatabase().getAllPlayers().stream()
-                    .filter(p -> p.lastName().equalsIgnoreCase(playerName))
-                    .findFirst()
-                    .ifPresentOrElse(p -> {
-                        PlayerStats stats = plugin.getDatabase().loadPlayerStats(p.uuid(), plugin.getConfigManager().get().currentSeasonId());
-                        sender.sendMessage(Component.text("=== Stats for " + p.lastName() + " ===", NamedTextColor.GOLD));
-                        sender.sendMessage(Component.text("Playtime: " + formatDuration(stats.getPlaytimeSeconds()), NamedTextColor.YELLOW));
-                        sender.sendMessage(Component.text("Blocks Mined: " + stats.getBlocksMined(), NamedTextColor.YELLOW));
-                        sender.sendMessage(Component.text("Mobs Killed: " + stats.getMobsKilled(), NamedTextColor.YELLOW));
-                    }, () -> sender.sendMessage(Component.text("Player not found.", NamedTextColor.RED)));
-            }
-            case "backup" -> {
-                var backup = plugin.getDatabase().createBackup();
-                if (backup != null) {
-                    sender.sendMessage(Component.text("Backup created: " + backup.getName(), NamedTextColor.GREEN));
-                } else {
-                    sender.sendMessage(Component.text("Backup failed.", NamedTextColor.RED));
-                }
-            }
-            default -> sender.sendMessage(Component.text("Unknown admin subcommand.", NamedTextColor.RED));
+            sender.sendMessage(Chat.of(Chat.GREEN, "Created and activated season: " + name + " (" + id + ")"));
+            sender.sendMessage(Chat.of(Chat.YELLOW, "Stats are now recorded into " + id + "."));
+        } catch (RuntimeException e) {
+            LOG.error("Could not create a season", e, LogContext.of(
+                "sender", sender.getName(), "season", id, "name", name));
+            sender.sendMessage(Chat.of(Chat.RED, "Could not create the season. Check the server log."));
+        }
+    }
+
+    private void handleAdminSeasonAction(CommandSender sender, String[] args, String action, String successMessage) {
+        if (args.length < 3) {
+            sender.sendMessage(Chat.of(Chat.RED, "Usage: /wrapped admin " + action + " <season>"));
+            return;
+        }
+        String seasonId = args[2];
+        boolean ok;
+        if (action.equals("end")) {
+            ok = plugin.getSeasonManager().endSeason(seasonId);
+        } else if (action.equals("publish")) {
+            ok = plugin.getSeasonManager().publishSeason(seasonId);
+        } else {
+            ok = plugin.getSeasonManager().unpublishSeason(seasonId);
+        }
+        if (ok) {
+            sender.sendMessage(Chat.of(Chat.GREEN, successMessage + ": " + seasonId));
+        } else {
+            sender.sendMessage(Chat.of(Chat.RED, "Failed to " + action + " season."));
+        }
+    }
+
+    private void handleAdminSwitch(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage(Chat.of(Chat.RED, "Usage: /wrapped admin switch <season>"));
+            return;
+        }
+        String seasonId = args[2];
+        if (plugin.getSeasonManager().switchSeason(seasonId)) {
+            sender.sendMessage(Chat.of(Chat.GREEN, "Now recording into season: " + seasonId));
+        } else {
+            sender.sendMessage(Chat.of(Chat.RED, "Failed to switch season. Check the server log."));
+        }
+    }
+
+    private void handleAdminSeasons(CommandSender sender) {
+        sender.sendMessage(Chat.title("=== Seasons ==="));
+        String current = plugin.getSeasonManager().currentSeasonId();
+        for (Season season : plugin.getSeasonManager().getAllSeasons()) {
+            String marker = season.id().equals(current) ? "* " : "  ";
+            sender.sendMessage(Chat.of(season.isActive() ? Chat.GREEN : Chat.YELLOW,
+                marker + season.id() + " [" + season.state() + "] " + season.name()));
+        }
+    }
+
+    private void handleAdminStats(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage(Chat.of(Chat.RED, "Usage: /wrapped admin stats <player>"));
+            return;
+        }
+        final String playerName = args[2];
+        plugin.getDatabase().getAllPlayers().stream()
+            .filter(p -> p.lastName().equalsIgnoreCase(playerName))
+            .findFirst()
+            .ifPresentOrElse(p -> {
+                PlayerStats stats = plugin.getDatabase().loadPlayerStats(
+                    p.uuid(), plugin.getConfigManager().get().currentSeasonId());
+                sender.sendMessage(Chat.title("=== Stats for " + p.lastName() + " ==="));
+                sender.sendMessage(Chat.line(Chat.YELLOW, "Playtime", formatDuration(stats.getPlaytimeSeconds())));
+                sender.sendMessage(Chat.line(Chat.YELLOW, "Blocks Mined", String.valueOf(stats.getBlocksMined())));
+                sender.sendMessage(Chat.line(Chat.YELLOW, "Mobs Killed", String.valueOf(stats.getMobsKilled())));
+            }, () -> sender.sendMessage(Chat.of(Chat.RED, "Player not found.")));
+    }
+
+    private void handleAdminBackup(CommandSender sender) {
+        File backup = plugin.getDatabase().createBackup();
+        if (backup != null) {
+            sender.sendMessage(Chat.of(Chat.GREEN, "Backup created: " + backup.getName()));
+        } else {
+            sender.sendMessage(Chat.of(Chat.RED, "Backup failed."));
         }
     }
 
@@ -265,22 +279,24 @@ public class WrappedCommand implements CommandExecutor, TabCompleter {
         List<String> completions = new ArrayList<>();
 
         if (args.length == 1) {
-            completions.addAll(List.of("stats", "top", "help", "reload"));
+            completions.addAll(Arrays.asList("stats", "top", "help", "reload"));
             if (sender.hasPermission("smpwrapped.admin")) {
                 completions.add("admin");
             }
         } else if (args.length == 2 && args[0].equalsIgnoreCase("admin")) {
-            completions.addAll(List.of("create", "seasons", "switch", "end", "publish", "unpublish", "stats", "backup"));
+            completions.addAll(Arrays.asList(
+                "create", "seasons", "switch", "end", "publish", "unpublish", "stats", "backup"));
         } else if (args.length == 3 && args[0].equalsIgnoreCase("admin")) {
-            if (args[1].equalsIgnoreCase("switch") || args[1].equalsIgnoreCase("end")
-                || args[1].equalsIgnoreCase("publish") || args[1].equalsIgnoreCase("unpublish")) {
-                completions.addAll(plugin.getSeasonManager().getAllSeasons().stream()
-                    .map(Season::id)
-                    .toList());
-            } else if (args[1].equalsIgnoreCase("stats")) {
-                completions.addAll(plugin.getDatabase().getAllPlayers().stream()
-                    .map(TrackedPlayer::lastName)
-                    .toList());
+            String action = args[1].toLowerCase();
+            if (action.equals("switch") || action.equals("end")
+                || action.equals("publish") || action.equals("unpublish")) {
+                for (Season season : plugin.getSeasonManager().getAllSeasons()) {
+                    completions.add(season.id());
+                }
+            } else if (action.equals("stats")) {
+                for (TrackedPlayer tracked : plugin.getDatabase().getAllPlayers()) {
+                    completions.add(tracked.lastName());
+                }
             }
         }
 

@@ -1,5 +1,9 @@
 # SMPWrapped Configuration
 # ========================
+#
+# Supported server versions: 1.16.3 up to 26.3 (and everything in between).
+# Requires Java 11 or newer on the server.
+# Compiled against the 1.16.3 API, so it also loads on 26.x (Java 21).
 
 # Web server settings
 web:

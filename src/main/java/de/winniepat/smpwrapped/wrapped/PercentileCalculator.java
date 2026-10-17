@@ -65,16 +65,28 @@ public final class PercentileCalculator {
     }
 
     private static double getStatValue(PlayerStats stats, String key) {
-        return switch (key) {
-            case "playtime_seconds" -> stats.getPlaytimeSeconds();
-            case "blocks_mined" -> stats.getBlocksMined();
-            case "blocks_placed" -> stats.getBlocksPlaced();
-            case "distance_traveled" -> stats.getDistanceTraveled();
-            case "mobs_killed" -> stats.getMobsKilled();
-            case "items_crafted" -> stats.getItemsCrafted();
-            case "fishing_catches" -> stats.getFishingCatches();
-            case "unique_days" -> stats.getUniqueDaysPlayed();
-            default -> 0;
-        };
+        if (key == null || stats == null) {
+            return 0;
+        }
+        switch (key) {
+            case "playtime_seconds":
+                return stats.getPlaytimeSeconds();
+            case "blocks_mined":
+                return stats.getBlocksMined();
+            case "blocks_placed":
+                return stats.getBlocksPlaced();
+            case "distance_traveled":
+                return stats.getDistanceTraveled();
+            case "mobs_killed":
+                return stats.getMobsKilled();
+            case "items_crafted":
+                return stats.getItemsCrafted();
+            case "fishing_catches":
+                return stats.getFishingCatches();
+            case "unique_days":
+                return stats.getUniqueDaysPlayed();
+            default:
+                return 0;
+        }
     }
 }

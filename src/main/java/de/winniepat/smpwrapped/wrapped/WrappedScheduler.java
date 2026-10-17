@@ -5,9 +5,7 @@ import de.winniepat.smpwrapped.config.PluginConfig;
 import de.winniepat.smpwrapped.log.LogContext;
 import de.winniepat.smpwrapped.log.SMPLogger;
 import de.winniepat.smpwrapped.model.TrackedPlayer;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.event.ClickEvent;
-import net.kyori.adventure.text.format.NamedTextColor;
+import de.winniepat.smpwrapped.util.Chat;
 import org.bukkit.entity.Player;
 
 import java.io.File;
@@ -191,24 +189,27 @@ public final class WrappedScheduler {
             return;
         }
         try {
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                try {
-                    String base = plugin.getConfigManager().get().publicBaseUrl();
-                    if (base != null && base.endsWith("/")) {
-                        base = base.substring(0, base.length() - 1);
+            plugin.getServer().getScheduler().runTask(plugin, new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        String base = plugin.getConfigManager().get().publicBaseUrl();
+                        if (base != null && base.endsWith("/")) {
+                            base = base.substring(0, base.length() - 1);
+                        }
+                        int notified = 0;
+                        for (Player player : plugin.getServer().getOnlinePlayers()) {
+                            String url = base + "/w/" + player.getName();
+                            player.sendMessage(Chat.prefix("Your " + reason + " Wrapped is ready!"));
+                            player.sendMessage(Chat.link("Click to open:", url));
+                            notified++;
+                        }
+                        LOG.debug("Notified online players", LogContext.of(
+                            "reason", reason, "notified", notified));
+                    } catch (Throwable t) {
+                        LOG.error("Could not notify players about their new Wrapped", t,
+                            LogContext.of("reason", reason));
                     }
-                    for (Player player : plugin.getServer().getOnlinePlayers()) {
-                        String url = base + "/w/" + player.getName();
-                        player.sendMessage(Component.text("[SMPWrapped] ", NamedTextColor.GREEN)
-                            .append(Component.text("Your " + reason + " Wrapped is ready! ", NamedTextColor.WHITE))
-                            .append(Component.text("Click to open", NamedTextColor.AQUA)
-                                .clickEvent(ClickEvent.openUrl(url))));
-                    }
-                    LOG.debug("Notified online players", LogContext.of(
-                        "reason", reason, "notified", plugin.getServer().getOnlinePlayers().size()));
-                } catch (Throwable t) {
-                    LOG.error("Could not notify players about their new Wrapped", t,
-                        LogContext.of("reason", reason));
                 }
             });
         } catch (Throwable t) {

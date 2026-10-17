@@ -138,13 +138,23 @@ public final class Logging {
     }
 
     static Level toJdkLevel(LogLevel level) {
-        return switch (level) {
-            case TRACE -> Level.FINER;
-            case DEBUG -> Level.FINE;
-            case INFO -> Level.INFO;
-            case WARN -> Level.WARNING;
-            case ERROR, FATAL -> Level.SEVERE;
-        };
+        if (level == null) {
+            return Level.INFO;
+        }
+        switch (level) {
+            case TRACE:
+                return Level.FINER;
+            case DEBUG:
+                return Level.FINE;
+            case WARN:
+                return Level.WARNING;
+            case ERROR:
+            case FATAL:
+                return Level.SEVERE;
+            case INFO:
+            default:
+                return Level.INFO;
+        }
     }
 
     private static final class DefaultSink implements LogSink {
