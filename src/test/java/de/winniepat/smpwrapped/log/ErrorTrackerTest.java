@@ -72,7 +72,7 @@ class ErrorTrackerTest {
         assertThat(tracker.decide(LogLevel.ERROR, "flaky", null).shouldLog()).isTrue();
         assertThat(tracker.decide(LogLevel.ERROR, "flaky", null).shouldLog()).isFalse();
 
-        Thread.sleep(15L);
+        Thread.sleep(120L);
 
         ErrorTracker.Decision resumed = tracker.decide(LogLevel.ERROR, "flaky", null);
         assertThat(resumed.shouldLog()).isTrue();

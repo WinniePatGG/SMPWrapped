@@ -32,8 +32,42 @@ class StatTrackerBlockTest {
     private Player player;
 
     @BeforeEach
-    void setUp() {
+void setUp() {
+    initTracker(false);
+    }
+
+    @Test
+    @DisplayName("Creative blocks are counted by default")
+    void creativeIsCountedByDefault() {
+        tracker.onBlockBreak(breakEvent(GameMode.CREATIVE, Material.STONE));
+        tracker.onBlockPlace(placeEvent(GameMode.CREATIVE, Material.BLACK_WOOL));
+
+        assertThat(stats.getBlocksMined()).isEqualTo(1);
+        assertThat(stats.getBlocksPlaced()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Creative blocks are skipped when the ignore setting is enabled")
+    void creativeIsSkippedWhenConfigured() {
         initTracker(true);
+
+        tracker.onBlockBreak(breakEvent(GameMode.CREATIVE, Material.STONE));
+        tracker.onBlockPlace(placeEvent(GameMode.CREATIVE, Material.BLACK_WOOL));
+
+        assertThat(stats.getBlocksMined()).isZero();
+        assertThat(stats.getBlocksPlaced()).isZero();
+    }
+
+    @Test
+    @DisplayName("Survival blocks count regardless of the ignore setting")
+    void survivalAlwaysCounts() {
+        initTracker(true);
+
+        tracker.onBlockBreak(breakEvent(GameMode.SURVIVAL, Material.STONE));
+        tracker.onBlockPlace(placeEvent(GameMode.SURVIVAL, Material.BLACK_WOOL));
+
+        assertThat(stats.getBlocksMined()).isEqualTo(1);
+        assertThat(stats.getBlocksPlaced()).isEqualTo(1);
     }
 
     private void initTracker(boolean ignoreCreative) {
@@ -109,15 +143,6 @@ class StatTrackerBlockTest {
     }
 
     @Test
-    @DisplayName("Creative breaks are ignored by default")
-    void creativeBreakIsIgnored() {
-        tracker.onBlockBreak(breakEvent(GameMode.CREATIVE, Material.STONE));
-
-        assertThat(stats.getBlocksMined()).isZero();
-        assertThat(stats.getBlocksMinedByType()).isEmpty();
-    }
-
-    @Test
     @DisplayName("Placing a block in survival increments blocks placed")
     void survivalPlaceCounts() {
         tracker.onBlockPlace(placeEvent(GameMode.SURVIVAL, Material.BLACK_WOOL));
@@ -127,39 +152,10 @@ class StatTrackerBlockTest {
     }
 
     @Test
-    @DisplayName("Creative placements are ignored too, so mining and placing agree")
-    void breakAndPlaceAreConsistent() {
-        tracker.onBlockBreak(breakEvent(GameMode.CREATIVE, Material.STONE));
-        tracker.onBlockPlace(placeEvent(GameMode.CREATIVE, Material.BLACK_WOOL));
+    @DisplayName("Spectator is skipped when the ignore setting is enabled")
+    void spectatorIsSkippedWhenConfigured() {
+        initTracker(true);
 
-        assertThat(stats.getBlocksMined()).isZero();
-        assertThat(stats.getBlocksPlaced()).as("creative placements must be ignored too").isZero();
-    }
-
-    @Test
-    @DisplayName("Creative is counted when the ignore setting is turned off")
-    void creativeCountsWhenConfigured() {
-        initTracker(false);
-
-        UUID id = PLAYER_ID;
-        Player creativePlayer = mock(Player.class);
-        when(creativePlayer.getUniqueId()).thenReturn(id);
-        when(creativePlayer.getGameMode()).thenReturn(GameMode.CREATIVE);
-
-        Block block = mock(Block.class);
-        when(block.getType()).thenReturn(Material.STONE);
-        BlockBreakEvent event = mock(BlockBreakEvent.class);
-        when(event.getPlayer()).thenReturn(creativePlayer);
-        when(event.getBlock()).thenReturn(block);
-
-        tracker.onBlockBreak(event);
-
-        assertThat(tracker.getBuffer().getBuffer(id).getBlocksMined()).isEqualTo(1);
-    }
-
-    @Test
-    @DisplayName("Spectator is ignored alongside creative")
-    void spectatorIsIgnored() {
         tracker.onBlockBreak(breakEvent(GameMode.SPECTATOR, Material.STONE));
         tracker.onBlockPlace(placeEvent(GameMode.SPECTATOR, Material.BLACK_WOOL));
 

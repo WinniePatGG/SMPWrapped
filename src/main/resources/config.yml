@@ -51,9 +51,10 @@ tracking:
   dimensions: true
   sessions: true
   achievements: true
-  # Ignore blocks mined and placed in Creative and Spectator mode.
-  # Applied to mining and placing so creative building cannot inflate the stats.
-  ignore-creative: true
+  # Count blocks mined and placed in Creative and Spectator mode too.
+  # Set to true if you only want survival-style block stats, so creative
+  # building and terraforming cannot inflate the numbers.
+  ignore-creative: false
 
 # Autosave interval (seconds)
 # How often changed stats are written to the database. Only players whose stats

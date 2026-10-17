@@ -58,7 +58,7 @@ public final class ConfigManager {
         cfg.addDefault("tracking.dimensions", true);
         cfg.addDefault("tracking.sessions", true);
         cfg.addDefault("tracking.achievements", true);
-        cfg.addDefault("tracking.ignore-creative", true);
+        cfg.addDefault("tracking.ignore-creative", false);
 
         cfg.addDefault("autosave.interval-seconds", 30);
 
@@ -109,6 +109,8 @@ public final class ConfigManager {
 
         cfg.options().copyDefaults(true);
         plugin.saveConfig();
+        plugin.reloadConfig();
+        cfg = plugin.getConfig();
 
         
         List<String> errors = new ArrayList<>();
@@ -241,7 +243,7 @@ public final class ConfigManager {
             cfg.getBoolean("tracking.dimensions", true),
             cfg.getBoolean("tracking.sessions", true),
             cfg.getBoolean("tracking.achievements", true),
-            cfg.getBoolean("tracking.ignore-creative", true),
+            cfg.getBoolean("tracking.ignore-creative", false),
             autosave,
             cache,
             snapshotRefresh,

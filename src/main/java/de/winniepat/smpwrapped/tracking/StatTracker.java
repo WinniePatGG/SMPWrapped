@@ -40,7 +40,10 @@ public class StatTracker implements Listener {
 
         this.buffer = new PlayerDataBuffer(seasonId,
             id -> plugin.getDatabase().loadPlayerStats(id, this.seasonId));
-        LOG.info("Stat tracker started", LogContext.of("season", seasonId));
+        LOG.info("Stat tracker started", LogContext.of(
+            "season", seasonId,
+            "blocks", plugin.getConfigManager().get().trackBlocks(),
+            "ignoreCreative", plugin.getConfigManager().get().ignoreCreativeBlocks()));
     }
 
     public String getSeasonId() {
